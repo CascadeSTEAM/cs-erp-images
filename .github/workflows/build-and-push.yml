@@ -1,0 +1,107 @@
+name: Build and Push ERPNext Images
+
+on:
+  push:
+    tags:
+      - "v*-r*"          # e.g. v16.23.1-r1
+  workflow_dispatch:
+    inputs:
+      use_case:
+        description: "Use case to build (subdirectory name under use-cases/, or 'all')"
+        required: true
+        default: "all"
+      tag:
+        description: "Image tag (e.g. v16.23.1-r1)"
+        required: true
+      frappe_branch:
+        description: "Frappe branch for the base image"
+        required: true
+        default: "version-16"
+
+env:
+  REGISTRY: ghcr.io
+  ORG: cascadesteam
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      use_cases: ${{ steps.list.outputs.use_cases }}
+      tag: ${{ steps.tag.outputs.tag }}
+      frappe_branch: ${{ steps.tag.outputs.frappe_branch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+            echo "frappe_branch=${{ github.event.inputs.frappe_branch }}" >> $GITHUB_OUTPUT
+          else
+            # Extract from git tag: v16.23.1-r1 → frappe branch version-16
+            TAG="${GITHUB_REF_NAME}"
+            MAJOR=$(echo "$TAG" | sed 's/^v//' | cut -d. -f1)
+            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+            echo "frappe_branch=version-${MAJOR}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: List use cases to build
+        id: list
+        run: |
+          INPUT="${{ github.event.inputs.use_case }}"
+          if [ "${{ github.event_name }}" = "push" ] || [ "$INPUT" = "all" ] || [ -z "$INPUT" ]; then
+            CASES=$(ls use-cases/ | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          else
+            CASES=$(echo "$INPUT" | jq -R -s -c 'split(" ") | map(select(length > 0))')
+          fi
+          echo "use_cases=${CASES}" >> $GITHUB_OUTPUT
+
+  build:
+    needs: discover
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        use_case: ${{ fromJson(needs.discover.outputs.use_cases) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ${{ matrix.use_case }}
+        run: |
+          USE_CASE="${{ matrix.use_case }}"
+          TAG="${{ needs.discover.outputs.tag }}"
+          FRAPPE_BRANCH="${{ needs.discover.outputs.frappe_branch }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.ORG }}/erp-${USE_CASE}"
+          APPS_JSON_B64=$(base64 -w 0 use-cases/${USE_CASE}/apps.json)
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg FRAPPE_PATH=https://github.com/frappe/frappe \
+            --build-arg FRAPPE_BRANCH=${FRAPPE_BRANCH} \
+            --build-arg APPS_JSON_BASE64=${APPS_JSON_B64} \
+            --tag ${IMAGE}:${TAG} \
+            --tag ${IMAGE}:latest \
+            --push \
+            --cache-from type=gha,scope=${USE_CASE} \
+            --cache-to type=gha,mode=max,scope=${USE_CASE} \
+            --file images/custom/Containerfile \
+            https://github.com/frappe/frappe_docker.git
+
+      - name: Summary
+        run: |
+          echo "### Built: ${{ matrix.use_case }}" >> $GITHUB_STEP_SUMMARY
+          echo "Image: \`ghcr.io/${{ env.ORG }}/erp-${{ matrix.use_case }}:${{ needs.discover.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
