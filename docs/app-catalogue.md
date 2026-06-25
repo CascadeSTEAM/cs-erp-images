@@ -14,7 +14,7 @@ released, or compatibility changes.
 
 | Column | Meaning |
 |--------|---------|
-| **Priority** | `install` = decided, will be included · `review` = under consideration · `vertical` = client-deployment specific · `built-in` = already in ERPNext/Frappe, no separate install |
+| **Priority** | `install` = decided, will be included · `review` = under consideration · `vertical` = client-deployment specific · `built-in` = already in ERPNext/Frappe, no separate install · `revisit-at-scale` = right tool but premature for current deployment count |
 | **Status** | `✅ confirmed` tested/working on v16 · `⚠ unverified` branch exists, untested · `❌ incompatible` known broken · `🗄 archived` repo archived · `🚧 not-production` flagged unstable by team |
 | **Source** | `official` = frappe org · `community` = third-party · `fork` = fork of archived official · `incubator` = frappe-funded community project |
 | **Branch** | Branch/tag to use in `apps.json` for v16 |
@@ -34,7 +34,7 @@ released, or compatibility changes.
 
 | App | Repo | Branch | Priority | Status | Source | Notes |
 |-----|------|--------|----------|--------|--------|-------|
-| Press | frappe/press | main | install | ⚠ unverified | official | Frappe Cloud hosting manager — manages sites, deployments, billing. **Heavy infrastructure app** — unusual in a client image; discuss whether this belongs in cs-managed-services or as a standalone deployment tool |
+| Press | frappe/press | main | revisit-at-scale | ⚠ unverified | official | Frappe Cloud hosting manager. Builds its own Docker images and runs a private S3-backed registry — **architecturally incompatible with cs-erp-images**. Replaces Ansible + docker compose + GHCR entirely. Revisit when managing 30+ client sites. See "Revisit at Scale" section. |
 | Mail | frappe/mail | main | install | ⚠ unverified | official | JMAP email frontend using Stalwart backend. New and evolving. Requires separate Stalwart server deployment |
 | Builder | frappe/builder | main | install | ⚠ unverified | official | WYSIWYG website/page builder. Figma plugin available |
 | Builder Hub | frappe/builder_hub | main | review | ⚠ unverified | official | Template library for Builder |
@@ -189,8 +189,18 @@ released, or compatibility changes.
 2. `Aakvatech-Limited/non_profit` + `klisia-org/frappe_giving` + `frappe/payments` — nonprofit image integration test
 3. `ury-erp/ury` — restaurant image test build
 4. `The-Commit-Company/raven` — retest v16 compatibility (flagged broken Jan 2026)
-5. `frappe/press` — assess whether this fits in cs-managed-services or is standalone tooling
-6. `frappe/mail` — assess Stalwart dependency requirements
+5. `frappe/mail` — assess Stalwart dependency requirements
+
+---
+
+## Revisit at Scale
+
+Apps deliberately deferred — not wrong choices, just premature for current deployment count.
+Revisit when the operational pain they solve becomes real.
+
+| App | Repo | Threshold | Why deferred | What it replaces |
+|-----|------|-----------|-------------|-----------------|
+| Press | frappe/press | ~30+ client sites | Builds its own Docker images + private registry — architecturally incompatible with cs-erp-images. Heavy infrastructure: requires S3, private registry server, agents on every managed node, and replaces Ansible/Compose entirely. | Ansible + docker compose + cs-erp-images + manual site provisioning |
 
 ---
 
@@ -200,3 +210,4 @@ released, or compatibility changes.
 |------|--------|
 | 2026-06-24 | Initial catalogue from research session |
 | 2026-06-24 | Major expansion from CS ERPNext Michael-Notes doc — added 40+ apps, TO INSTALL/REVIEW/VERTICAL categorisation, built-in flags, external integrations |
+| 2026-06-24 | Press moved to "Revisit at Scale" — architecturally incompatible with cs-erp-images (builds own images + private registry); deferred until 30+ client sites |
