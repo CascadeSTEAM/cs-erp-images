@@ -23,6 +23,13 @@ env:
   ORG: cascadesteam
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate use cases
+        run: bash scripts/validate.sh
+
   discover:
     runs-on: ubuntu-latest
     outputs:
@@ -58,7 +65,7 @@ jobs:
           echo "use_cases=${CASES}" >> $GITHUB_OUTPUT
 
   build:
-    needs: discover
+    needs: [discover, validate]
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -76,7 +76,7 @@ is released, a use-case assignment changes, or compatibility changes.
 | CRM | frappe/crm | main | install | ✅ confirmed | official | cs | Lead/deal/contact/client management |
 | Wiki | frappe/wiki | main | cs-dev | ⚠ unverified | official | cs-dev | Public/internal knowledge base. Moved to cs-dev — evaluate before promoting to cs |
 | LMS | frappe/lms | main | review | ⚠ unverified | official | — | Training programs. **Hold for next round** — evaluate after cs image is stable |
-| Education | frappe/education | version-16 | install | ✅ confirmed | official | cs | Student lifecycle, courses, fees. For LinuxFest / conference use |
+| Education | frappe/education | version-16 | cs-dev | ✅ confirmed | official | cs-dev | Student lifecycle, courses, fees. LinuxFest/conference use — not active, moved to cs-dev until needed |
 | Insights (BI) | frappe/insights | main | install | ⚠ unverified | official | cs | Self-serve analytics and data visualization |
 | HRMS | frappe/hrms | version-16 | install | ✅ confirmed (v16.10.1) | official | cs | HR, contracting, timesheets, payroll. **CS internal use only** — client orgs are mostly volunteer-run |
 | Payments | frappe/payments | develop | install | ✅ confirmed | official | cs, nonprofit, restaurant | Payment gateway abstraction (Stripe, PayPal, Razorpay) |
@@ -226,3 +226,4 @@ community AI apps if the official stack doesn't cover the need.*
 | 2026-06-24 | Press → revisit-at-scale |
 | 2026-06-24 | Added `images` column and use-case image table. Mail → watch-upstream (Mailcow as external recommendation). Gameplan → review. LMS → review (next round). AI apps → cs-dev. Meet/Drive/Suite/Buzz → cs-dev. Raven → cs. Introduced cs-dev image concept |
 | 2026-06-24 | Builder + Builder Hub → cs. Wiki → cs-dev. Insights → cs. |
+| 2026-06-24 | Education → cs-dev (LinuxFest work not active; move to cs-dev until needed) |
