@@ -198,6 +198,14 @@
 
   // ── Event binding ──────────────────────────────────────────────────────────
 
+  function updateButtonStates() {
+    const canAct = !!(state.name && state.selectedApps.size > 0);
+    const saveBtn   = document.getElementById('eg-save');
+    const submitBtn = document.getElementById('eg-submit');
+    if (saveBtn)   saveBtn.disabled   = !canAct || state.saving;
+    if (submitBtn) submitBtn.disabled = !canAct || state.phase === 'submitting';
+  }
+
   let versionDebounce = null;
 
   function bindFormEvents() {
@@ -209,6 +217,7 @@
     nameEl?.addEventListener('input', e => {
       state.name = e.target.value.trim();
       partialRenderPreview();
+      updateButtonStates();
     });
 
     descEl?.addEventListener('input', e => { state.description = e.target.value; });
@@ -233,6 +242,7 @@
         const countEl = document.querySelector('.eg-sel-count');
         if (countEl) countEl.textContent = `${state.selectedApps.size} selected`;
         partialRenderPreview();
+        updateButtonStates();
       });
     });
 
