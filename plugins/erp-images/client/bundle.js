@@ -116,7 +116,7 @@
           ${renderCatalogue()}
 
           <div class="eg-section-label">Preview</div>
-          ${renderPreview()}
+          <div id="eg-preview-wrap">${renderPreview()}</div>
 
           ${state.submitError ? `<div class="eg-error">${esc(state.submitError)}</div>` : ''}
 
@@ -191,7 +191,7 @@
 
     nameEl?.addEventListener('input', e => {
       state.name = e.target.value.trim();
-      document.querySelector('.eg-preview-meta') && partialRenderPreview();
+      partialRenderPreview();
     });
 
     descEl?.addEventListener('input', e => { state.description = e.target.value; });
@@ -250,11 +250,8 @@
   }
 
   function partialRenderPreview() {
-    const previewEl = document.querySelector('.eg-preview')?.parentElement;
-    if (!previewEl) return;
-    // Only re-render the preview div inline to avoid losing focus
-    const previewWrapper = document.querySelector('.eg-preview')?.parentElement;
-    if (previewWrapper) previewWrapper.innerHTML = renderPreview();
+    const wrap = document.getElementById('eg-preview-wrap');
+    if (wrap) wrap.innerHTML = renderPreview();
   }
 
   function scheduleVersionFetch() {
