@@ -49,8 +49,8 @@ is released, a use-case assignment changes, or compatibility changes.
 |-----|------|--------|----------|--------|--------|--------|-------|
 | Press | frappe/press | main | revisit-at-scale | ⚠ unverified | official | — | Builds own Docker images + private S3 registry. Architecturally incompatible with cs-erp-images. See "Revisit at Scale" section |
 | Mail | frappe/mail | main | watch-upstream | ⚠ unverified | official | — | JMAP frontend requiring Stalwart backend. CS staying on Google for now. **External alternative: Mailcow** (Docker, Postfix+Dovecot+Rspamd) connects to ERPNext via standard SMTP/IMAP — no Frappe app needed |
-| Builder | frappe/builder | main | install | ⚠ unverified | official | cs | WYSIWYG website/page builder. Confirmed for cs image. Figma plugin available |
-| Builder Hub | frappe/builder_hub | main | install | ⚠ unverified | official | cs | Template library for Builder — include alongside Builder |
+| Builder | frappe/builder | develop | install | ⚠ unverified | official | cs | WYSIWYG website/page builder. Confirmed for cs image. Figma plugin available |
+| Builder Hub | frappe/builder_hub | develop | install | ⚠ unverified | official | cs | Template library for Builder — include alongside Builder |
 | AI / MCP | frappe/mcp | main | cs-dev | ⚠ unverified | official | cs-dev | Official Frappe AI framework. Evaluate in cs-dev before promoting to cs |
 | AI / Skills | frappe/skills | main | cs-dev | ⚠ unverified | official | cs-dev | AI skills framework. Evaluate in cs-dev before promoting to cs |
 
@@ -60,7 +60,7 @@ is released, a use-case assignment changes, or compatibility changes.
 
 | App | Repo | Branch | Priority | Status | Source | Images | Notes |
 |-----|------|--------|----------|--------|--------|--------|-------|
-| Raven | The-Commit-Company/raven | version-16 | install | ⚠ unverified | community | cs | Real-time chat. Repo moved from frappe/raven. Has v16 branch — **needs test build before cs image release** |
+| Raven | The-Commit-Company/raven | develop | install | ⚠ unverified | community | cs | Real-time chat. Repo moved from frappe/raven. No version-16 branch — default is develop. **Needs test build before cs image release** |
 | Gameplan | frappe/gameplan | main | review | ⚠ unverified | official | — | Async team discussions. Raven sufficient for now; revisit if Raven channels become inadequate |
 | Meet | frappe/meet | main | cs-dev | 🚧 not-production | official | cs-dev | Video calling. Not production ready — trial only |
 | Drive | frappe/drive | main | cs-dev | 🚧 not-production | official | cs-dev | Google Drive replacement. Not production ready — trial only |
@@ -74,7 +74,7 @@ is released, a use-case assignment changes, or compatibility changes.
 | App | Repo | Branch | Priority | Status | Source | Images | Notes |
 |-----|------|--------|----------|--------|--------|--------|-------|
 | CRM | frappe/crm | main | install | ✅ confirmed | official | cs | Lead/deal/contact/client management |
-| Wiki | frappe/wiki | main | cs-dev | ⚠ unverified | official | cs-dev | Public/internal knowledge base. Moved to cs-dev — evaluate before promoting to cs |
+| Wiki | frappe/wiki | develop | cs-dev | ⚠ unverified | official | cs-dev | Public/internal knowledge base. Moved to cs-dev — evaluate before promoting to cs |
 | LMS | frappe/lms | main | review | ⚠ unverified | official | — | Training programs. **Hold for next round** — evaluate after cs image is stable |
 | Education | frappe/education | version-16 | cs-dev | ✅ confirmed | official | cs-dev | Student lifecycle, courses, fees. LinuxFest/conference use — not active, moved to cs-dev until needed |
 | Insights (BI) | frappe/insights | main | install | ⚠ unverified | official | cs | Self-serve analytics and data visualization |
@@ -227,3 +227,4 @@ community AI apps if the official stack doesn't cover the need.*
 | 2026-06-24 | Added `images` column and use-case image table. Mail → watch-upstream (Mailcow as external recommendation). Gameplan → review. LMS → review (next round). AI apps → cs-dev. Meet/Drive/Suite/Buzz → cs-dev. Raven → cs. Introduced cs-dev image concept |
 | 2026-06-24 | Builder + Builder Hub → cs. Wiki → cs-dev. Insights → cs. |
 | 2026-06-24 | Education → cs-dev (LinuxFest work not active; move to cs-dev until needed) |
+| 2026-06-24 | Fix branch refs: raven/builder/builder_hub/wiki → develop (no main/version-16 branch exists) |

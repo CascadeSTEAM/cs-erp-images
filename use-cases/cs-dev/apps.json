@@ -1,0 +1,34 @@
+[
+  {
+    "url": "https://github.com/frappe/erpnext",
+    "branch": "version-16"
+  },
+  {
+    "url": "https://github.com/frappe/wiki",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/education",
+    "branch": "version-16"
+  },
+  {
+    "url": "https://github.com/frappe/mcp",
+    "branch": "main"
+  },
+  {
+    "url": "https://github.com/frappe/skills",
+    "branch": "main"
+  },
+  {
+    "url": "https://github.com/frappe/meet",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/drive",
+    "branch": "main"
+  },
+  {
+    "url": "https://github.com/BuildWithHussain/buzz",
+    "branch": "main"
+  }
+]

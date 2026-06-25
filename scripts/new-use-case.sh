@@ -24,9 +24,10 @@ if [ ! -f "$TEMPLATE" ]; then
     exit 1
 fi
 
-mkdir -p "$UC_DIR"
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 
-cat > "${UC_DIR}/apps.json" << 'EOF'
+cat > "${TMPDIR}/apps.json" << 'EOF'
 [
   {
     "url": "https://github.com/frappe/erpnext",
@@ -35,7 +36,9 @@ cat > "${UC_DIR}/apps.json" << 'EOF'
 ]
 EOF
 
-sed "s/{{NAME}}/${NAME}/g; s/{{DESCRIPTION}}/${DESCRIPTION}/g" "$TEMPLATE" > "${UC_DIR}/README.md"
+sed "s|{{NAME}}|${NAME}|g; s|{{DESCRIPTION}}|${DESCRIPTION}|g" "$TEMPLATE" > "${TMPDIR}/README.md"
+
+mv "$TMPDIR" "$UC_DIR"
 
 echo "Created use-cases/${NAME}/"
 echo "  apps.json — edit to add apps (url + branch per entry)"
