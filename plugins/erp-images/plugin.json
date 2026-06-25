@@ -1,0 +1,12 @@
+{
+  "apiVersion": "1",
+  "name": "erp-images",
+  "displayName": "ERP Images",
+  "version": "0.1.0",
+  "description": "Frappe/ERPNext Docker image pipeline — define use cases, build images, deploy customer sites",
+  "icon": "🐳",
+  "author": "NetYeti",
+  "serverEntrypoint": "server.js",
+  "clientEntrypoint": "client/bundle.js",
+  "clientStylesheet": "client/style.css"
+}
