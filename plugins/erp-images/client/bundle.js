@@ -6,19 +6,35 @@
   // ── State ──────────────────────────────────────────────────────────────────
 
   const state = {
-    phase: 'loading',   // loading | form | submitting | done | error
-    catalogue: [],      // [{name, apps:[]}]
-    name: '',
-    description: '',
-    frappeMajor: '16',
-    selectedApps: new Map(), // repo -> {repo, branch}
-    nextVersion: null,
-    loadError: null,
-    submitResult: null,
-    submitError: null,
-    tokenSet: false,
-    saveResult: null,   // {path, buildCmd} after local save
-    saving: false,
+    view: 'create',   // 'create' | 'deploy'
+
+    create: {
+      phase: 'loading',  // loading | form | saving | saved
+      catalogue: [],
+      name: '',
+      description: '',
+      frappeMajor: '16',
+      selectedApps: new Map(),
+      nextVersion: null,
+      loadError: null,
+      saveResult: null,
+      saving: false,
+      tokenSet: false,
+    },
+
+    deploy: {
+      loading: true,
+      useCases: [],    // [{name, apps, builtTags, source}]
+      targets: [],     // [{id, name, type, description}]
+      selected: null,  // use case name
+      target: 'local',
+      tag: '',
+      building: false,
+      buildLog: [],
+      buildDone: false,
+      buildFailed: false,
+      loadError: null,
+    },
   };
 
   // ── DOM helpers ────────────────────────────────────────────────────────────
@@ -28,149 +44,108 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
-
   function root() { return document.getElementById('plugin-root'); }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Top-level render ───────────────────────────────────────────────────────
 
   function renderApp() {
     const el = root();
     if (!el) return;
+    el.innerHTML = renderTabs() +
+      (state.view === 'create' ? renderCreateView() : renderDeployView());
+    state.view === 'create' ? bindCreateEvents() : bindDeployEvents();
+  }
 
-    if (state.phase === 'loading') {
-      el.innerHTML = '<div class="eg-loading">Loading app catalogue…</div>';
-      return;
-    }
+  function renderTabs() {
+    return `
+      <div class="eg-tabs">
+        <button class="eg-tab ${state.view === 'create' ? 'eg-tab-active' : ''}" data-view="create">📦 Create</button>
+        <button class="eg-tab ${state.view === 'deploy' ? 'eg-tab-active' : ''}" data-view="deploy">🚀 Deploy</button>
+      </div>`;
+  }
 
-    if (state.phase === 'done') {
-      el.innerHTML = `
-        <div class="eg-done">
-          <div class="eg-done-icon">✅</div>
-          <div class="eg-done-title">Pull request created</div>
-          <a class="eg-done-link" href="${esc(state.submitResult.pr_url)}" target="_blank" rel="noopener">
-            Open PR on GitHub →
-          </a>
-          <div class="eg-done-meta">
-            Branch: <code>${esc(state.submitResult.branch)}</code> &nbsp;·&nbsp;
-            Suggested tag: <code>${esc(state.submitResult.tag)}</code>
+  // ── CREATE VIEW ────────────────────────────────────────────────────────────
+
+  function renderCreateView() {
+    const c = state.create;
+    if (c.phase === 'loading') return '<div class="eg-loading">Loading app catalogue…</div>';
+
+    return `<div class="eg-wrap">
+      <div class="eg-header">
+        <span class="eg-header-icon">📦</span>
+        <div>
+          <div class="eg-header-title">Define Use Case</div>
+          <div class="eg-header-sub">Name your image, pick apps, save locally — then build and deploy from the Deploy tab</div>
+        </div>
+      </div>
+
+      ${c.loadError ? `<div class="eg-error">Failed to load catalogue: ${esc(c.loadError)}</div>` : ''}
+
+      <form id="eg-form" class="eg-form" autocomplete="off">
+        <div class="eg-section-label">Use Case</div>
+        <div class="eg-row2">
+          <div class="eg-field">
+            <label class="eg-label" for="eg-name">Name <span class="eg-hint">(kebab-case)</span></label>
+            <input id="eg-name" class="eg-input" type="text" placeholder="my-use-case"
+              pattern="[a-z][a-z0-9-]*" value="${esc(c.name)}" autocomplete="off" spellcheck="false"/>
           </div>
-          <button class="eg-btn eg-btn-ghost" id="eg-new">Create another</button>
-        </div>`;
-      document.getElementById('eg-new').onclick = () => {
-        state.phase = 'form';
-        state.name = '';
-        state.description = '';
-        state.selectedApps.clear();
-        state.submitResult = null;
-        renderApp();
-      };
-      return;
-    }
-
-    el.innerHTML = `
-      <div class="eg-wrap">
-        <div class="eg-header">
-          <span class="eg-header-icon">📦</span>
-          <div>
-            <div class="eg-header-title">Image Generator</div>
-            <div class="eg-header-sub">Define a use case → open a GitHub PR → CI builds the image</div>
+          <div class="eg-field">
+            <label class="eg-label" for="eg-frappe">Frappe Version</label>
+            <select id="eg-frappe" class="eg-select">
+              ${['15','16','17'].map(v =>
+                `<option value="${v}" ${c.frappeMajor === v ? 'selected' : ''}>v${v}</option>`
+              ).join('')}
+            </select>
           </div>
         </div>
 
-        ${!state.tokenSet ? `
-        <div class="eg-warn">
-          ⚠ <strong>GITHUB_TOKEN not set.</strong>
-          Add <code>GITHUB_TOKEN=ghp_...</code> to <code>cs-erp-images/.env</code> to enable PR creation.
-          App selection and preview still work.
+        <div class="eg-field">
+          <label class="eg-label" for="eg-desc">Description</label>
+          <textarea id="eg-desc" class="eg-textarea" rows="2"
+            placeholder="What is this image for?">${esc(c.description)}</textarea>
+        </div>
+
+        <div class="eg-section-label">App Selection
+          <span class="eg-sel-count">${c.selectedApps.size} selected</span>
+        </div>
+        ${renderCatalogue()}
+
+        <div class="eg-section-label">Preview</div>
+        <div id="eg-preview-wrap">${renderPreview()}</div>
+
+        ${c.saveResult ? `
+        <div class="eg-saved">
+          <div class="eg-saved-title">✅ Saved → <code>${esc(c.saveResult.path)}</code></div>
+          <div class="eg-saved-note">Switching to Deploy tab…</div>
         </div>` : ''}
 
-        ${state.loadError ? `<div class="eg-error">Failed to load catalogue: ${esc(state.loadError)}</div>` : ''}
-
-        <form id="eg-form" class="eg-form" autocomplete="off">
-
-          <div class="eg-section-label">Use Case</div>
-          <div class="eg-row2">
-            <div class="eg-field">
-              <label class="eg-label" for="eg-name">Name <span class="eg-hint">(kebab-case)</span></label>
-              <input id="eg-name" class="eg-input" type="text" placeholder="my-use-case"
-                pattern="[a-z][a-z0-9-]*" value="${esc(state.name)}" autocomplete="off" spellcheck="false"/>
-            </div>
-            <div class="eg-field">
-              <label class="eg-label" for="eg-frappe">Frappe Version</label>
-              <select id="eg-frappe" class="eg-select">
-                ${['15','16','17'].map(v =>
-                  `<option value="${v}" ${state.frappeMajor === v ? 'selected' : ''}>v${v}</option>`
-                ).join('')}
-              </select>
-            </div>
-          </div>
-
-          <div class="eg-field">
-            <label class="eg-label" for="eg-desc">Description</label>
-            <textarea id="eg-desc" class="eg-textarea" rows="2"
-              placeholder="What is this image for?">${esc(state.description)}</textarea>
-          </div>
-
-          <div class="eg-section-label">App Selection
-            <span class="eg-sel-count">${state.selectedApps.size} selected</span>
-          </div>
-
-          ${renderCatalogue()}
-
-          <div class="eg-section-label">Preview</div>
-          <div id="eg-preview-wrap">${renderPreview()}</div>
-
-          ${state.submitError ? `<div class="eg-error">${esc(state.submitError)}</div>` : ''}
-
-          ${state.saveResult ? `
-          <div class="eg-saved">
-            <div class="eg-saved-title">✅ Saved locally → <code>${esc(state.saveResult.path)}</code></div>
-            <div class="eg-saved-label">Build command:</div>
-            <div class="eg-saved-cmd-row">
-              <code class="eg-saved-cmd">${esc(state.saveResult.buildCmd)}</code>
-              <button class="eg-copy" id="eg-copy-cmd" title="Copy to clipboard">📋</button>
-            </div>
-            <div class="eg-saved-note">Run from the cs-erp-images directory. Requires Docker Buildx. ~15–25 min first run.</div>
-          </div>` : ''}
-
-          <div class="eg-actions">
-            <button type="button" id="eg-save" class="eg-btn eg-btn-save"
-              ${(state.saving || !state.name || state.selectedApps.size === 0) ? 'disabled' : ''}>
-              ${state.saving ? '⏳ Saving…' : '💾 Save locally'}
-            </button>
-            <button type="submit" id="eg-submit" class="eg-btn eg-btn-primary"
-              ${(state.phase === 'submitting' || !state.name || state.selectedApps.size === 0) ? 'disabled' : ''}>
-              ${state.phase === 'submitting' ? '⏳ Creating PR…' : '🚀 Create GitHub PR'}
-            </button>
-            ${!state.tokenSet ? '<span class="eg-actions-note">Token required to create PR</span>' : ''}
-          </div>
-
-        </form>
-      </div>`;
-
-    bindFormEvents();
+        <div class="eg-actions">
+          <button type="button" id="eg-save" class="eg-btn eg-btn-save"
+            ${(c.saving || !c.name || c.selectedApps.size === 0) ? 'disabled' : ''}>
+            ${c.saving ? '⏳ Saving…' : '💾 Save locally'}
+          </button>
+        </div>
+      </form>
+    </div>`;
   }
 
   function renderCatalogue() {
-    if (!state.catalogue.length) {
-      return '<div class="eg-notice">No apps loaded from catalogue.</div>';
-    }
-    return state.catalogue.map(cat => `
+    const c = state.create;
+    if (!c.catalogue.length) return '<div class="eg-notice">No apps loaded.</div>';
+    return c.catalogue.map(cat => `
       <div class="eg-cat">
         <div class="eg-cat-name">${esc(cat.name)}</div>
         <div class="eg-app-list">
           ${cat.apps.map(app => {
-            const key    = app.repo;
-            const checked = state.selectedApps.has(key);
-            return `
-              <label class="eg-app ${checked ? 'eg-app-checked' : ''}">
-                <input type="checkbox" class="eg-app-cb" data-repo="${esc(app.repo)}"
-                  data-branch="${esc(app.branch)}" data-name="${esc(app.name)}"
-                  ${checked ? 'checked' : ''}/>
-                <span class="eg-app-icon">${app.statusIcon}</span>
-                <span class="eg-app-name">${esc(app.name)}</span>
-                <span class="eg-app-ref">${esc(app.repo)}@${esc(app.branch)}</span>
-              </label>`;
+            const checked = c.selectedApps.has(app.repo);
+            return `<label class="eg-app ${checked ? 'eg-app-checked' : ''}">
+              <input type="checkbox" class="eg-app-cb"
+                data-repo="${esc(app.repo)}" data-branch="${esc(app.branch)}" data-name="${esc(app.name)}"
+                ${checked ? 'checked' : ''}/>
+              <span class="eg-app-icon">${app.statusIcon}</span>
+              <span class="eg-app-name">${esc(app.name)}</span>
+              <span class="eg-app-ref">${esc(app.repo)}@${esc(app.branch)}</span>
+            </label>`;
           }).join('')}
         </div>
       </div>`
@@ -178,136 +153,108 @@
   }
 
   function renderPreview() {
-    if (!state.name && state.selectedApps.size === 0) {
+    const c = state.create;
+    if (!c.name && c.selectedApps.size === 0) {
       return '<div class="eg-notice">Fill in a name and select apps to see the preview.</div>';
     }
-    const appsArr = [...state.selectedApps.values()];
+    const appsArr = [...c.selectedApps.values()];
     const json = JSON.stringify(
-      appsArr.map(a => ({ url: `https://github.com/${a.repo}`, branch: a.branch })),
-      null, 2
+      appsArr.map(a => ({ url: `https://github.com/${a.repo}`, branch: a.branch })), null, 2
     );
-    const versionLine = state.nextVersion
-      ? `Suggested tag: <strong>${esc(state.nextVersion)}</strong> &nbsp;·&nbsp; Branch: <code>use-case/${esc(state.name) || '&lt;name&gt;'}</code>`
+    const versionLine = c.nextVersion
+      ? `Suggested tag: <strong>${esc(c.nextVersion)}</strong> &nbsp;·&nbsp; Branch: <code>use-case/${esc(c.name) || '&lt;name&gt;'}</code>`
       : 'Fetching next version…';
-    return `
-      <div class="eg-preview">
-        <div class="eg-preview-meta">${versionLine}</div>
-        <pre class="eg-code">${esc(json)}</pre>
-      </div>`;
+    return `<div class="eg-preview">
+      <div class="eg-preview-meta">${versionLine}</div>
+      <pre class="eg-code">${esc(json)}</pre>
+    </div>`;
   }
 
-  // ── Event binding ──────────────────────────────────────────────────────────
+  // ── DEPLOY VIEW ────────────────────────────────────────────────────────────
+
+  function renderDeployView() {
+    const d = state.deploy;
+    if (d.loading) return '<div class="eg-loading">Loading use cases…</div>';
+    if (d.loadError) return `<div class="eg-error" style="margin:24px">${esc(d.loadError)}</div>`;
+
+    const sel = d.useCases.find(uc => uc.name === d.selected);
+    const isBuilt = sel && sel.builtTags.length > 0;
+
+    return `<div class="eg-wrap">
+      <div class="eg-header">
+        <span class="eg-header-icon">🚀</span>
+        <div>
+          <div class="eg-header-title">Deploy</div>
+          <div class="eg-header-sub">Build a local image and deploy it to a target environment</div>
+        </div>
+      </div>
+
+      <div class="eg-section-label">Use Case</div>
+      ${d.useCases.length === 0
+        ? `<div class="eg-notice">No local use cases found. <button class="eg-link" id="dp-go-create">Create one →</button></div>`
+        : `<div class="eg-uc-list">
+          ${d.useCases.map(uc => {
+            const built = uc.builtTags.length > 0;
+            return `<label class="eg-uc ${uc.name === d.selected ? 'eg-uc-selected' : ''}">
+              <input type="radio" name="eg-uc" value="${esc(uc.name)}" ${uc.name === d.selected ? 'checked' : ''}/>
+              <div class="eg-uc-info">
+                <span class="eg-uc-name">${esc(uc.name)}</span>
+                <span class="eg-uc-apps">${uc.apps.length} app${uc.apps.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div class="eg-uc-build ${built ? 'eg-uc-built' : 'eg-uc-notbuilt'}">
+                ${built ? `✅ ${uc.builtTags[0]}` : '○ Not built'}
+              </div>
+            </label>`;
+          }).join('')}
+        </div>`
+      }
+
+      <div class="eg-section-label" style="margin-top:16px">Target</div>
+      <div class="eg-target-list">
+        ${d.targets.map(t => `
+          <label class="eg-target ${t.id === d.target ? 'eg-target-selected' : ''}">
+            <input type="radio" name="eg-target" value="${esc(t.id)}" ${t.id === d.target ? 'checked' : ''}/>
+            <div class="eg-target-info">
+              <span class="eg-target-name">${esc(t.name)}</span>
+              <span class="eg-target-desc">${esc(t.description)}</span>
+            </div>
+          </label>`
+        ).join('')}
+      </div>
+
+      ${sel ? `
+        <div class="eg-section-label" style="margin-top:16px">Actions</div>
+        <div class="eg-deploy-actions">
+          <button class="eg-btn eg-btn-build" id="dp-build"
+            ${d.building ? 'disabled' : ''}>
+            ${d.building ? '⏳ Building…' : isBuilt ? '🔨 Rebuild' : '🔨 Build'}
+          </button>
+          ${isBuilt ? `<button class="eg-btn eg-btn-primary" id="dp-deploy"
+            ${d.building ? 'disabled' : ''}>
+            🚀 Deploy to ${esc(d.targets.find(t => t.id === d.target)?.name || d.target)}
+          </button>` : ''}
+          ${d.tag ? `<span class="eg-deploy-tag">tag: <code>${esc(d.tag)}</code></span>` : ''}
+        </div>
+
+        ${(d.building || d.buildLog.length > 0) ? `
+        <div class="eg-build-output">
+          <div class="eg-build-status ${d.buildDone ? 'eg-build-ok' : d.buildFailed ? 'eg-build-fail' : 'eg-build-running'}">
+            ${d.buildDone ? '✅ Build complete' : d.buildFailed ? '❌ Build failed' : '⏳ Building…'}
+          </div>
+          <pre class="eg-build-log" id="dp-log">${esc(d.buildLog.join(''))}</pre>
+        </div>` : ''}
+      ` : '<div class="eg-notice" style="margin-top:12px">Select a use case to continue.</div>'}
+
+    </div>`;
+  }
+
+  // ── CREATE events ──────────────────────────────────────────────────────────
 
   function updateButtonStates() {
-    const canAct = !!(state.name && state.selectedApps.size > 0);
-    const saveBtn   = document.getElementById('eg-save');
-    const submitBtn = document.getElementById('eg-submit');
-    if (saveBtn)   saveBtn.disabled   = !canAct || state.saving;
-    if (submitBtn) submitBtn.disabled = !canAct || state.phase === 'submitting';
-  }
-
-  let versionDebounce = null;
-
-  function bindFormEvents() {
-    const nameEl   = document.getElementById('eg-name');
-    const descEl   = document.getElementById('eg-desc');
-    const frappeEl = document.getElementById('eg-frappe');
-    const form     = document.getElementById('eg-form');
-
-    nameEl?.addEventListener('input', e => {
-      state.name = e.target.value.trim();
-      partialRenderPreview();
-      updateButtonStates();
-    });
-
-    descEl?.addEventListener('input', e => { state.description = e.target.value; });
-
-    frappeEl?.addEventListener('change', e => {
-      state.frappeMajor = e.target.value;
-      state.nextVersion = null;
-      scheduleVersionFetch();
-      partialRenderPreview();
-    });
-
-    document.querySelectorAll('.eg-app-cb').forEach(cb => {
-      cb.addEventListener('change', e => {
-        const { repo, branch, name } = e.target.dataset;
-        if (e.target.checked) {
-          state.selectedApps.set(repo, { repo, branch, name });
-        } else {
-          state.selectedApps.delete(repo);
-        }
-        const label = e.target.closest('.eg-app');
-        if (label) label.classList.toggle('eg-app-checked', e.target.checked);
-        const countEl = document.querySelector('.eg-sel-count');
-        if (countEl) countEl.textContent = `${state.selectedApps.size} selected`;
-        partialRenderPreview();
-        updateButtonStates();
-      });
-    });
-
-    document.getElementById('eg-save')?.addEventListener('click', async () => {
-      if (!state.name || state.selectedApps.size === 0) return;
-      state.saving = true;
-      state.saveResult = null;
-      renderApp();
-      try {
-        const res = await fetch(`${API}/api/save-local`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: state.name,
-            description: state.description,
-            frappeMajor: state.frappeMajor,
-            apps: [...state.selectedApps.values()],
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || res.statusText);
-        state.saveResult = data;
-      } catch (err) {
-        state.submitError = `Save failed: ${err.message}`;
-      }
-      state.saving = false;
-      renderApp();
-    });
-
-    document.getElementById('eg-copy-cmd')?.addEventListener('click', () => {
-      if (state.saveResult?.buildCmd) {
-        navigator.clipboard.writeText(state.saveResult.buildCmd)
-          .then(() => window.__docwright?.toast('Build command copied', 2000))
-          .catch(() => {});
-      }
-    });
-
-    form?.addEventListener('submit', async e => {
-      e.preventDefault();
-      if (!state.name || state.selectedApps.size === 0) return;
-      state.phase       = 'submitting';
-      state.submitError = null;
-      renderApp();
-
-      try {
-        const res = await fetch(`${API}/api/create`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name:         state.name,
-            description:  state.description,
-            frappeMajor:  state.frappeMajor,
-            apps:         [...state.selectedApps.values()],
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || res.statusText);
-        state.submitResult = data;
-        state.phase = 'done';
-      } catch (err) {
-        state.submitError = err.message;
-        state.phase = 'form';
-      }
-      renderApp();
-    });
+    const c = state.create;
+    const canAct = !!(c.name && c.selectedApps.size > 0);
+    const saveBtn = document.getElementById('eg-save');
+    if (saveBtn) saveBtn.disabled = !canAct || c.saving;
   }
 
   function partialRenderPreview() {
@@ -315,49 +262,219 @@
     if (wrap) wrap.innerHTML = renderPreview();
   }
 
+  let versionDebounce = null;
   function scheduleVersionFetch() {
     clearTimeout(versionDebounce);
     versionDebounce = setTimeout(fetchNextVersion, 400);
   }
 
+  function bindCreateEvents() {
+    const c = state.create;
+    document.querySelectorAll('.eg-tab').forEach(btn => {
+      btn.addEventListener('click', () => { state.view = btn.dataset.view; renderApp(); loadDeployIfNeeded(); });
+    });
+
+    document.getElementById('eg-name')?.addEventListener('input', e => {
+      c.name = e.target.value.trim();
+      partialRenderPreview();
+      updateButtonStates();
+    });
+
+    document.getElementById('eg-desc')?.addEventListener('input', e => { c.description = e.target.value; });
+
+    document.getElementById('eg-frappe')?.addEventListener('change', e => {
+      c.frappeMajor = e.target.value;
+      c.nextVersion = null;
+      scheduleVersionFetch();
+      partialRenderPreview();
+    });
+
+    document.querySelectorAll('.eg-app-cb').forEach(cb => {
+      cb.addEventListener('change', e => {
+        const { repo, branch, name } = e.target.dataset;
+        e.target.checked ? c.selectedApps.set(repo, { repo, branch, name })
+                         : c.selectedApps.delete(repo);
+        const label = e.target.closest('.eg-app');
+        if (label) label.classList.toggle('eg-app-checked', e.target.checked);
+        const countEl = document.querySelector('.eg-sel-count');
+        if (countEl) countEl.textContent = `${c.selectedApps.size} selected`;
+        partialRenderPreview();
+        updateButtonStates();
+      });
+    });
+
+    document.getElementById('eg-save')?.addEventListener('click', async () => {
+      if (!c.name || c.selectedApps.size === 0) return;
+      c.saving = true;
+      c.saveResult = null;
+      renderApp();
+      try {
+        const res = await fetch(`${API}/api/save-local`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: c.name, description: c.description,
+            frappeMajor: c.frappeMajor,
+            apps: [...c.selectedApps.values()],
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        c.saveResult = data;
+        c.saving = false;
+        renderApp();
+        // Auto-switch to deploy with this use case pre-selected
+        setTimeout(() => {
+          state.deploy.selected = c.name;
+          state.view = 'deploy';
+          loadDeployIfNeeded();
+          renderApp();
+        }, 800);
+      } catch (err) {
+        c.saving = false;
+        c.loadError = `Save failed: ${err.message}`;
+        renderApp();
+      }
+    });
+  }
+
+  // ── DEPLOY events ──────────────────────────────────────────────────────────
+
+  function bindDeployEvents() {
+    document.querySelectorAll('.eg-tab').forEach(btn => {
+      btn.addEventListener('click', () => { state.view = btn.dataset.view; renderApp(); loadDeployIfNeeded(); });
+    });
+
+    document.getElementById('dp-go-create')?.addEventListener('click', () => {
+      state.view = 'create'; renderApp();
+    });
+
+    document.querySelectorAll('input[name="eg-uc"]').forEach(r => {
+      r.addEventListener('change', async e => {
+        state.deploy.selected = e.target.value;
+        state.deploy.buildLog = [];
+        state.deploy.buildDone = false;
+        state.deploy.buildFailed = false;
+        state.deploy.building = false;
+        // fetch next version for tag suggestion
+        const d = state.deploy;
+        const uc = d.useCases.find(u => u.name === d.selected);
+        if (uc) {
+          const major = '16'; // TODO: derive from uc apps
+          const res = await fetch(`${API}/api/next-version?major=${major}`);
+          if (res.ok) { const v = await res.json(); d.tag = v.tag; }
+        }
+        renderApp();
+      });
+    });
+
+    document.querySelectorAll('input[name="eg-target"]').forEach(r => {
+      r.addEventListener('change', e => { state.deploy.target = e.target.value; renderApp(); });
+    });
+
+    document.getElementById('dp-build')?.addEventListener('click', () => {
+      const d = state.deploy;
+      if (!d.selected || d.building) return;
+      const tag = d.tag || 'v16-r1';
+      startBuild(d.selected, tag);
+    });
+
+    document.getElementById('dp-deploy')?.addEventListener('click', () => {
+      window.__docwright?.notify({
+        type: 'info',
+        title: 'Deploy',
+        message: 'Ansible deployment coming in the next phase.',
+      });
+    });
+  }
+
+  // ── Build streaming ────────────────────────────────────────────────────────
+
+  function startBuild(name, tag) {
+    const d = state.deploy;
+    d.building = true;
+    d.buildLog = [];
+    d.buildDone = false;
+    d.buildFailed = false;
+    renderApp();
+
+    const url = `${API}/api/build?name=${encodeURIComponent(name)}&tag=${encodeURIComponent(tag)}`;
+    const es = new EventSource(url);
+
+    es.onmessage = (e) => {
+      const { line } = JSON.parse(e.data);
+      d.buildLog.push(line);
+      const logEl = document.getElementById('dp-log');
+      if (logEl) { logEl.textContent += line; logEl.scrollTop = logEl.scrollHeight; }
+    };
+
+    es.addEventListener('done', (e) => {
+      const { code } = JSON.parse(e.data);
+      d.building = false;
+      d.buildDone = code === 0;
+      d.buildFailed = code !== 0;
+      es.close();
+      // Refresh build status for this use case
+      fetch(`${API}/api/use-cases`).then(r => r.json()).then(ucs => {
+        d.useCases = ucs;
+        renderApp();
+      }).catch(() => renderApp());
+    });
+
+    es.addEventListener('error', () => {
+      d.building = false;
+      d.buildFailed = true;
+      es.close();
+      renderApp();
+    });
+  }
+
   // ── Data loading ───────────────────────────────────────────────────────────
 
+  let deployLoaded = false;
+  function loadDeployIfNeeded() {
+    if (state.view !== 'deploy' || deployLoaded) return;
+    deployLoaded = false; // allow refresh
+    const d = state.deploy;
+    d.loading = true;
+    d.loadError = null;
+    Promise.all([
+      fetch(`${API}/api/use-cases`).then(r => r.json()),
+      fetch(`${API}/api/targets`).then(r => r.json()),
+    ]).then(([ucs, targets]) => {
+      d.useCases = ucs;
+      d.targets = targets;
+      d.loading = false;
+      deployLoaded = true;
+      if (!d.selected && ucs.length > 0) d.selected = ucs[0].name;
+      renderApp();
+    }).catch(err => {
+      d.loading = false;
+      d.loadError = err.message;
+      renderApp();
+    });
+  }
+
   async function fetchNextVersion() {
+    const c = state.create;
     try {
-      const res = await fetch(`${API}/api/next-version?major=${encodeURIComponent(state.frappeMajor)}`);
-      if (res.ok) {
-        const data = await res.json();
-        state.nextVersion = data.tag;
-        const metaEl = document.querySelector('.eg-preview-meta');
-        if (metaEl) metaEl.innerHTML = renderPreview().match(/class="eg-preview-meta">(.*?)<\/div>/s)?.[1] ?? '';
-      }
+      const res = await fetch(`${API}/api/next-version?major=${encodeURIComponent(c.frappeMajor)}`);
+      if (res.ok) { const v = await res.json(); c.nextVersion = v.tag; partialRenderPreview(); }
     } catch { /* non-fatal */ }
   }
 
-  async function init() {
-    const el = root();
-    if (!el) return;
-
-    renderApp();
-
+  async function initCreate() {
+    const c = state.create;
     try {
       const [statusRes, catRes] = await Promise.all([
         fetch(`${API}/api/status`),
         fetch(`${API}/api/catalogue`),
       ]);
-
-      if (statusRes.ok) {
-        const s = await statusRes.json();
-        state.tokenSet = !!s.github_token_set;
-      }
-
+      if (statusRes.ok) { const s = await statusRes.json(); c.tokenSet = !!s.github_token_set; }
       if (!catRes.ok) throw new Error(`Catalogue fetch failed: ${catRes.status}`);
-      state.catalogue = await catRes.json();
-    } catch (e) {
-      state.loadError = e.message;
-    }
-
-    state.phase = 'form';
+      c.catalogue = await catRes.json();
+    } catch (e) { c.loadError = e.message; }
+    c.phase = 'form';
     renderApp();
     fetchNextVersion();
   }
@@ -366,37 +483,33 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    .eg-wrap { max-width: 780px; margin: 0 auto; padding: 24px 24px 40px; font-family: system-ui,-apple-system,sans-serif; }
-    .eg-header { display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+    .eg-tabs { display:flex; border-bottom:2px solid var(--border,#1e2030); padding:0 20px; gap:0; flex-shrink:0; }
+    .eg-tab { background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px;
+      padding:10px 18px; font-size:13px; font-weight:600; color:var(--muted,#666); cursor:pointer; }
+    .eg-tab:hover { color:var(--fg,#ccc); }
+    .eg-tab-active { color:var(--fg,#e0e0f0); border-bottom-color:#58a6ff; }
+    .eg-wrap { max-width:780px; margin:0 auto; padding:20px 24px 40px; font-family:system-ui,-apple-system,sans-serif; }
+    .eg-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
     .eg-header-icon { font-size:28px; }
     .eg-header-title { font-size:17px; font-weight:700; color:var(--fg,#e0e0f0); }
     .eg-header-sub { font-size:12px; color:var(--muted,#666); margin-top:2px; }
-    .eg-warn { background:rgba(210,153,34,.1); border-left:3px solid #d29922; padding:10px 14px; border-radius:4px; font-size:12px; color:#d29922; margin-bottom:16px; }
     .eg-error { background:rgba(218,54,51,.1); border-left:3px solid #da3633; padding:10px 14px; border-radius:4px; font-size:12px; color:#da3633; margin-bottom:16px; }
     .eg-notice { font-size:12px; color:var(--muted,#666); padding:10px 0; }
-    .eg-form { display:flex; flex-direction:column; gap:16px; }
+    .eg-link { background:none; border:none; color:#58a6ff; cursor:pointer; font-size:12px; text-decoration:underline; }
+    .eg-form { display:flex; flex-direction:column; gap:14px; }
     .eg-row2 { display:grid; grid-template-columns:1fr auto; gap:12px; }
     .eg-field { display:flex; flex-direction:column; gap:4px; }
     .eg-section-label { font-size:11px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:8px; margin-top:4px; }
     .eg-sel-count { font-weight:400; text-transform:none; letter-spacing:0; color:var(--fg,#aaa); }
     .eg-label { font-size:12px; color:var(--fg,#ccc); }
     .eg-hint { font-weight:400; color:var(--muted,#666); }
-    .eg-input, .eg-select, .eg-textarea {
-      background:var(--bg-2,#111128); border:1px solid var(--border,#2a2a4a);
-      border-radius:6px; color:var(--fg,#e0e0f0); font-size:13px; padding:7px 10px;
-      font-family:inherit;
-    }
-    .eg-input:focus, .eg-select:focus, .eg-textarea:focus { outline:none; border-color:#4a6aba; }
-    .eg-select { padding-right:24px; }
+    .eg-input,.eg-select,.eg-textarea { background:var(--bg-2,#111128); border:1px solid var(--border,#2a2a4a); border-radius:6px; color:var(--fg,#e0e0f0); font-size:13px; padding:7px 10px; font-family:inherit; }
+    .eg-input:focus,.eg-select:focus,.eg-textarea:focus { outline:none; border-color:#4a6aba; }
     .eg-textarea { resize:vertical; }
     .eg-cat { margin-bottom:4px; }
     .eg-cat-name { font-size:11px; font-weight:600; color:var(--muted,#555); margin:8px 0 4px; text-transform:uppercase; letter-spacing:.4px; }
     .eg-app-list { display:flex; flex-direction:column; gap:2px; }
-    .eg-app {
-      display:flex; align-items:center; gap:8px; padding:6px 10px;
-      border-radius:5px; cursor:pointer; border:1px solid transparent;
-      transition:background .1s;
-    }
+    .eg-app { display:flex; align-items:center; gap:8px; padding:5px 10px; border-radius:5px; cursor:pointer; border:1px solid transparent; }
     .eg-app:hover { background:var(--bg-2,#1a1a2a); }
     .eg-app-checked { background:rgba(88,166,255,.07); border-color:rgba(88,166,255,.2); }
     .eg-app input[type=checkbox] { accent-color:#58a6ff; width:14px; height:14px; flex-shrink:0; }
@@ -406,16 +519,10 @@
     .eg-preview { background:var(--bg-2,#0d0d1e); border:1px solid var(--border,#2a2a4a); border-radius:6px; overflow:hidden; }
     .eg-preview-meta { font-size:12px; color:var(--muted,#888); padding:8px 12px; border-bottom:1px solid var(--border,#2a2a4a); }
     .eg-code { margin:0; padding:12px; font-size:12px; font-family:monospace; overflow-x:auto; color:var(--fg,#cce0ff); white-space:pre; }
-    .eg-actions { display:flex; align-items:center; gap:12px; padding-top:4px; }
-    .eg-actions-note { font-size:11px; color:var(--muted,#666); }
-    .eg-saved { background:rgba(63,185,80,.07); border:1px solid rgba(63,185,80,.25); border-radius:6px; padding:14px 16px; display:flex; flex-direction:column; gap:6px; }
+    .eg-saved { background:rgba(63,185,80,.07); border:1px solid rgba(63,185,80,.25); border-radius:6px; padding:12px 16px; display:flex; flex-direction:column; gap:4px; }
     .eg-saved-title { font-size:13px; font-weight:600; color:var(--fg,#e0e0f0); }
-    .eg-saved-label { font-size:11px; color:var(--muted,#666); text-transform:uppercase; letter-spacing:.4px; }
-    .eg-saved-cmd-row { display:flex; align-items:center; gap:8px; }
-    .eg-saved-cmd { font-size:12px; font-family:monospace; color:#4caf50; background:rgba(0,0,0,.2); padding:6px 10px; border-radius:4px; flex:1; word-break:break-all; }
     .eg-saved-note { font-size:11px; color:var(--muted,#666); }
-    .eg-copy { background:none; border:1px solid #444; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:13px; }
-    .eg-copy:hover { border-color:#888; }
+    .eg-actions { display:flex; align-items:center; gap:12px; padding-top:4px; }
     .eg-btn { padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid; }
     .eg-btn-save { background:none; border-color:#3a5a3a; color:#4caf50; }
     .eg-btn-save:hover:not(:disabled) { background:rgba(63,185,80,.1); }
@@ -423,28 +530,43 @@
     .eg-btn-primary { background:#1e3a6e; border-color:#2a5aba; color:#7ab0ff; }
     .eg-btn-primary:hover:not(:disabled) { background:#253e7e; }
     .eg-btn-primary:disabled { opacity:.4; cursor:default; }
-    .eg-btn-ghost { background:none; border-color:var(--border,#444); color:var(--muted,#888); }
-    .eg-btn-ghost:hover { border-color:#888; color:var(--fg,#ccc); }
-    .eg-loading, .eg-done { padding:40px 24px; text-align:center; color:var(--muted,#888); font-size:13px; }
-    .eg-done { display:flex; flex-direction:column; align-items:center; gap:12px; }
-    .eg-done-icon { font-size:40px; }
-    .eg-done-title { font-size:16px; font-weight:700; color:var(--fg,#e0e0f0); }
-    .eg-done-link { color:#58a6ff; font-size:14px; text-decoration:none; }
-    .eg-done-link:hover { text-decoration:underline; }
-    .eg-done-meta { font-size:12px; color:var(--muted,#666); }
-    html[data-theme="light"] .eg-wrap { color:#1a1a1a; }
+    .eg-btn-build { background:none; border-color:#5a4a2a; color:#d4a017; }
+    .eg-btn-build:hover:not(:disabled) { background:rgba(212,160,23,.1); }
+    .eg-btn-build:disabled { opacity:.4; cursor:default; }
+    .eg-loading { padding:40px 24px; text-align:center; color:var(--muted,#888); font-size:13px; }
+    /* Deploy view */
+    .eg-uc-list,.eg-target-list { display:flex; flex-direction:column; gap:4px; }
+    .eg-uc,.eg-target { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:6px; border:1px solid var(--border,#2a2a4a); cursor:pointer; }
+    .eg-uc:hover,.eg-target:hover { border-color:#3a3a6a; }
+    .eg-uc-selected,.eg-target-selected { border-color:#4a6aba; background:rgba(88,166,255,.05); }
+    .eg-uc input,.eg-target input { accent-color:#58a6ff; flex-shrink:0; }
+    .eg-uc-info,.eg-target-info { flex:1; display:flex; flex-direction:column; gap:2px; }
+    .eg-uc-name,.eg-target-name { font-size:13px; font-weight:600; color:var(--fg,#e0e0f0); }
+    .eg-uc-apps { font-size:11px; color:var(--muted,#666); }
+    .eg-target-desc { font-size:11px; color:var(--muted,#666); }
+    .eg-uc-build { font-size:11px; font-family:monospace; padding:2px 8px; border-radius:10px; }
+    .eg-uc-built { color:#4caf50; background:rgba(63,185,80,.1); border:1px solid rgba(63,185,80,.3); }
+    .eg-uc-notbuilt { color:var(--muted,#666); background:var(--bg-2,#1a1a1a); border:1px solid var(--border,#333); }
+    .eg-deploy-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .eg-deploy-tag { font-size:11px; color:var(--muted,#666); }
+    .eg-build-output { margin-top:12px; border:1px solid var(--border,#2a2a4a); border-radius:6px; overflow:hidden; }
+    .eg-build-status { padding:7px 12px; font-size:12px; font-weight:600; border-bottom:1px solid var(--border,#2a2a4a); }
+    .eg-build-running { color:#58a6ff; background:rgba(88,166,255,.07); }
+    .eg-build-ok  { color:#4caf50; background:rgba(63,185,80,.07); }
+    .eg-build-fail { color:#da3633; background:rgba(218,54,51,.07); }
+    .eg-build-log { margin:0; padding:12px; font-size:11px; font-family:monospace; white-space:pre-wrap; word-break:break-all; color:var(--fg,#ccc); max-height:320px; overflow-y:auto; }
+    html[data-theme="light"] .eg-tabs { border-bottom-color:#d0d0d0; }
+    html[data-theme="light"] .eg-tab { color:#888; }
+    html[data-theme="light"] .eg-tab-active { color:#1a1a2e; border-bottom-color:#4a6cf7; }
     html[data-theme="light"] .eg-header-title { color:#1a1a2e; }
-    html[data-theme="light"] .eg-input, html[data-theme="light"] .eg-select, html[data-theme="light"] .eg-textarea {
-      background:#f5f5ff; border-color:#c0c0e0; color:#1a1a2e; }
+    html[data-theme="light"] .eg-input,.eg-select,.eg-textarea { background:#f5f5ff; border-color:#c0c0e0; color:#1a1a2e; }
     html[data-theme="light"] .eg-app:hover { background:#eaeaff; }
     html[data-theme="light"] .eg-app-checked { background:#dde8ff; border-color:#aaccee; }
-    html[data-theme="light"] .eg-app-name { color:#1a1a2e; }
-    html[data-theme="light"] .eg-preview { background:#f0f0fc; border-color:#c0c0e0; }
-    html[data-theme="light"] .eg-code { color:#1a3a6e; }
-    html[data-theme="light"] .eg-btn-primary { background:#ddeeff; border-color:#6699cc; color:#1a4080; }
-    html[data-theme="light"] .eg-done-title { color:#1a1a2e; }
+    html[data-theme="light"] .eg-uc,.eg-target { border-color:#d0d0e0; }
+    html[data-theme="light"] .eg-uc-selected,.eg-target-selected { border-color:#4a6cf7; background:#eef3ff; }
   `;
   document.head.appendChild(style);
 
-  init();
+  initCreate();
+  loadDeployIfNeeded();
 })();

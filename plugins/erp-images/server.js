@@ -245,6 +245,91 @@ function saveLocal({ name, description, frappeMajor, apps }) {
   return { path: `use-cases/${name}`, buildCmd };
 }
 
+// ── Use-case list ────────────────────────────────────────────────────────────
+
+function listUseCases() {
+  const ucDir = path.join(VAULT_ROOT, 'use-cases');
+  if (!fs.existsSync(ucDir)) return [];
+
+  const { execFileSync } = require('child_process');
+  const results = [];
+
+  for (const entry of fs.readdirSync(ucDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const appsPath = path.join(ucDir, entry.name, 'apps.json');
+    if (!fs.existsSync(appsPath)) continue;
+
+    let apps = [];
+    try { apps = JSON.parse(fs.readFileSync(appsPath, 'utf-8')); } catch { continue; }
+
+    let builtTags = [];
+    try {
+      const out = execFileSync('docker', [
+        'images', `ghcr.io/cascadesteam/erp-${entry.name}`,
+        '--format', '{{.Tag}}',
+      ], { encoding: 'utf-8', timeout: 5000 });
+      builtTags = out.trim().split('\n').filter(Boolean);
+    } catch { /* docker unavailable or no image — leave empty */ }
+
+    results.push({ name: entry.name, apps, builtTags, source: 'local' });
+  }
+  return results;
+}
+
+// ── Target list ───────────────────────────────────────────────────────────────
+
+function listTargets() {
+  const defaults = [
+    { id: 'local', name: 'Local (Docker)', type: 'local',
+      description: 'Build and run on this machine' },
+  ];
+  const configPath = path.join(VAULT_ROOT, '.erp-images-targets.json');
+  if (!fs.existsSync(configPath)) return defaults;
+  try {
+    const extra = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    return [...defaults, ...(extra.targets || [])];
+  } catch { return defaults; }
+}
+
+// ── Build (SSE stream) ────────────────────────────────────────────────────────
+
+function buildStream(name, tag) {
+  const buildScript = path.join(VAULT_ROOT, 'scripts/build-local.sh');
+  if (!fs.existsSync(buildScript)) {
+    throw new Error('scripts/build-local.sh not found in vault root');
+  }
+
+  const { spawn } = require('child_process');
+  const sse = (obj) => `data: ${JSON.stringify(obj)}\n\n`;
+  const sseEvent = (event, obj) => `event: ${event}\ndata: ${JSON.stringify(obj)}\n\n`;
+
+  const stream = new ReadableStream({
+    start(ctrl) {
+      const enc = (s) => ctrl.enqueue(Buffer.from(s));
+      const proc = spawn('bash', [buildScript, name, tag], { cwd: VAULT_ROOT });
+
+      proc.stdout.on('data', d => enc(sse({ line: d.toString() })));
+      proc.stderr.on('data', d => enc(sse({ line: d.toString() })));
+      proc.on('close', code => {
+        enc(sseEvent('done', { code }));
+        ctrl.close();
+      });
+      proc.on('error', err => {
+        enc(sseEvent('error', { message: err.message }));
+        ctrl.close();
+      });
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
 // ── Request routing ───────────────────────────────────────────────────────────
 
 async function GET({ subpath }) {
@@ -261,6 +346,26 @@ async function GET({ subpath }) {
     const major = new URL(`http://x?${subpath.split('?')[1] || ''}`).searchParams.get('major') || '16';
     const tag   = await getNextVersion(major);
     return Response.json({ tag });
+  }
+
+  if (subpath === 'api/use-cases') {
+    return Response.json(listUseCases());
+  }
+
+  if (subpath === 'api/targets') {
+    return Response.json(listTargets());
+  }
+
+  if (subpath.startsWith('api/build')) {
+    const qs    = subpath.includes('?') ? subpath.split('?')[1] : '';
+    const params = new URLSearchParams(qs);
+    const name  = params.get('name');
+    const tag   = params.get('tag') || `v${params.get('major') || '16'}-r1`;
+    if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
+      return new Response('invalid or missing name', { status: 400 });
+    }
+    try { return buildStream(name, tag); }
+    catch (e) { return new Response(e.message, { status: 500 }); }
   }
 
   return new Response(`erp-images: unknown path "${subpath}"`, { status: 404 });
