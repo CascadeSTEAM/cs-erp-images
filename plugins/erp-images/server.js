@@ -214,6 +214,37 @@ async function createPR({ name, description, frappeMajor, apps }) {
   return { pr_url: pr.html_url, tag, branch: branchName };
 }
 
+// ── Local save ───────────────────────────────────────────────────────────────
+
+function saveLocal({ name, description, frappeMajor, apps }) {
+  if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) throw new Error('Invalid use-case name');
+  if (!apps || apps.length === 0) throw new Error('No apps selected');
+
+  const ucDir = path.join(VAULT_ROOT, 'use-cases', name);
+  fs.mkdirSync(ucDir, { recursive: true });
+
+  // apps.json
+  const appsJson = JSON.stringify(
+    apps.map(a => ({ url: `https://github.com/${a.repo}`, branch: a.branch })),
+    null, 2,
+  ) + '\n';
+  fs.writeFileSync(path.join(ucDir, 'apps.json'), appsJson, 'utf-8');
+
+  // README.md from TEMPLATE.md
+  const templatePath = path.join(VAULT_ROOT, 'use-cases/TEMPLATE.md');
+  const template = fs.existsSync(templatePath)
+    ? fs.readFileSync(templatePath, 'utf-8')
+    : `# {{NAME}}\n\n**Image:** \`ghcr.io/cascadesteam/erp-{{NAME}}\`\n\n{{DESCRIPTION}}\n`;
+  const readme = template
+    .replace(/\{\{NAME\}\}/g, name)
+    .replace(/\{\{DESCRIPTION\}\}/g, description);
+  fs.writeFileSync(path.join(ucDir, 'README.md'), readme, 'utf-8');
+
+  // Build command for the user to run
+  const buildCmd = `./scripts/build-local.sh ${name} v${frappeMajor}-r1`;
+  return { path: `use-cases/${name}`, buildCmd };
+}
+
 // ── Request routing ───────────────────────────────────────────────────────────
 
 async function GET({ subpath }) {
@@ -245,6 +276,17 @@ async function POST({ request, subpath }) {
       return Response.json({ error: e.message }, { status: 400 });
     }
   }
+
+  if (subpath === 'api/save-local') {
+    try {
+      const body = await request.json();
+      const result = saveLocal(body);
+      return Response.json(result);
+    } catch (e) {
+      return Response.json({ error: e.message }, { status: 400 });
+    }
+  }
+
   return new Response('Not found', { status: 404 });
 }
 

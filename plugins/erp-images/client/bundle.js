@@ -17,6 +17,8 @@
     submitResult: null,
     submitError: null,
     tokenSet: false,
+    saveResult: null,   // {path, buildCmd} after local save
+    saving: false,
   };
 
   // ── DOM helpers ────────────────────────────────────────────────────────────
@@ -120,7 +122,22 @@
 
           ${state.submitError ? `<div class="eg-error">${esc(state.submitError)}</div>` : ''}
 
+          ${state.saveResult ? `
+          <div class="eg-saved">
+            <div class="eg-saved-title">✅ Saved locally → <code>${esc(state.saveResult.path)}</code></div>
+            <div class="eg-saved-label">Build command:</div>
+            <div class="eg-saved-cmd-row">
+              <code class="eg-saved-cmd">${esc(state.saveResult.buildCmd)}</code>
+              <button class="eg-copy" id="eg-copy-cmd" title="Copy to clipboard">📋</button>
+            </div>
+            <div class="eg-saved-note">Run from the cs-erp-images directory. Requires Docker Buildx. ~15–25 min first run.</div>
+          </div>` : ''}
+
           <div class="eg-actions">
+            <button type="button" id="eg-save" class="eg-btn eg-btn-save"
+              ${(state.saving || !state.name || state.selectedApps.size === 0) ? 'disabled' : ''}>
+              ${state.saving ? '⏳ Saving…' : '💾 Save locally'}
+            </button>
             <button type="submit" id="eg-submit" class="eg-btn eg-btn-primary"
               ${(state.phase === 'submitting' || !state.name || state.selectedApps.size === 0) ? 'disabled' : ''}>
               ${state.phase === 'submitting' ? '⏳ Creating PR…' : '🚀 Create GitHub PR'}
@@ -217,6 +234,40 @@
         if (countEl) countEl.textContent = `${state.selectedApps.size} selected`;
         partialRenderPreview();
       });
+    });
+
+    document.getElementById('eg-save')?.addEventListener('click', async () => {
+      if (!state.name || state.selectedApps.size === 0) return;
+      state.saving = true;
+      state.saveResult = null;
+      renderApp();
+      try {
+        const res = await fetch(`${API}/api/save-local`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: state.name,
+            description: state.description,
+            frappeMajor: state.frappeMajor,
+            apps: [...state.selectedApps.values()],
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        state.saveResult = data;
+      } catch (err) {
+        state.submitError = `Save failed: ${err.message}`;
+      }
+      state.saving = false;
+      renderApp();
+    });
+
+    document.getElementById('eg-copy-cmd')?.addEventListener('click', () => {
+      if (state.saveResult?.buildCmd) {
+        navigator.clipboard.writeText(state.saveResult.buildCmd)
+          .then(() => window.__docwright?.toast('Build command copied', 2000))
+          .catch(() => {});
+      }
     });
 
     form?.addEventListener('submit', async e => {
@@ -347,7 +398,18 @@
     .eg-code { margin:0; padding:12px; font-size:12px; font-family:monospace; overflow-x:auto; color:var(--fg,#cce0ff); white-space:pre; }
     .eg-actions { display:flex; align-items:center; gap:12px; padding-top:4px; }
     .eg-actions-note { font-size:11px; color:var(--muted,#666); }
+    .eg-saved { background:rgba(63,185,80,.07); border:1px solid rgba(63,185,80,.25); border-radius:6px; padding:14px 16px; display:flex; flex-direction:column; gap:6px; }
+    .eg-saved-title { font-size:13px; font-weight:600; color:var(--fg,#e0e0f0); }
+    .eg-saved-label { font-size:11px; color:var(--muted,#666); text-transform:uppercase; letter-spacing:.4px; }
+    .eg-saved-cmd-row { display:flex; align-items:center; gap:8px; }
+    .eg-saved-cmd { font-size:12px; font-family:monospace; color:#4caf50; background:rgba(0,0,0,.2); padding:6px 10px; border-radius:4px; flex:1; word-break:break-all; }
+    .eg-saved-note { font-size:11px; color:var(--muted,#666); }
+    .eg-copy { background:none; border:1px solid #444; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:13px; }
+    .eg-copy:hover { border-color:#888; }
     .eg-btn { padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid; }
+    .eg-btn-save { background:none; border-color:#3a5a3a; color:#4caf50; }
+    .eg-btn-save:hover:not(:disabled) { background:rgba(63,185,80,.1); }
+    .eg-btn-save:disabled { opacity:.4; cursor:default; }
     .eg-btn-primary { background:#1e3a6e; border-color:#2a5aba; color:#7ab0ff; }
     .eg-btn-primary:hover:not(:disabled) { background:#253e7e; }
     .eg-btn-primary:disabled { opacity:.4; cursor:default; }
