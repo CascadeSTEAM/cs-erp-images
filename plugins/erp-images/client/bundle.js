@@ -86,16 +86,28 @@ v16.1.0
     const mainEl = root();
     if (mainEl) mainEl.innerHTML = renderMain();
 
-    // Sidebar into DocWright's panel slot (mounted by layout.svelte)
-    mountSidebar();
+    // Refresh sidebar if it's already mounted; otherwise watchForSidebar handles it
+    const sidebarEl = document.getElementById('erp-images-sidebar-root');
+    if (sidebarEl) { sidebarEl.innerHTML = renderSidebar(); bindSidebar(); }
 
     bindAll();
   }
 
   function mountSidebar() {
     const el = document.getElementById('erp-images-sidebar-root');
-    if (el) { el.innerHTML = renderSidebar(); return true; }
+    if (el) { el.innerHTML = renderSidebar(); bindSidebar(); return true; }
     return false;
+  }
+
+  // Watch for the sidebar div to appear (Svelte may render it after the bundle fires)
+  function watchForSidebar() {
+    if (mountSidebar()) return; // already there
+    const obs = new MutationObserver(() => {
+      if (mountSidebar()) obs.disconnect();
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    // Safety valve — disconnect after 10s regardless
+    setTimeout(() => obs.disconnect(), 10000);
   }
 
   function renderMain() {
@@ -469,7 +481,7 @@ v16.1.0
   // ── EVENT BINDING ──────────────────────────────────────────────────────────
 
   function bindAll() {
-    bindSidebar();
+    // Sidebar binds separately via mountSidebar/watchForSidebar
     if (state.view === 'create') bindCreate();
     if (state.view === 'detail') bindDetail();
     if (state.view === 'help')   bindHelp();
@@ -941,8 +953,7 @@ v16.1.0
     ]);
     state.help.content = helpData.content;
     renderApp();
-    // Retry sidebar mount — DocWright's panel may render after the bundle fires
-    if (!mountSidebar()) setTimeout(() => { mountSidebar(); }, 150);
+    watchForSidebar();
   }
 
   init();
