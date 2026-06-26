@@ -1,2 +1,17 @@
 .env
 *.local
+
+# DocWright — managed entries (added by adopt-vault.ts)
+.dw-session.json
+node_modules
+.claude/skills/
+.opencode/skills/
+.gemini/agents/
+.gemini/settings.json
+.claude/
+.opencode/
+.docwright/
+.envrc
+.mcp.json
+.obsidian/
+*.local
