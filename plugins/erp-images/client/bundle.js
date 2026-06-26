@@ -560,6 +560,8 @@ v16.1.0
     if (!d.targets.length) loadTargets();
     if (source === 'local') loadNextBuildTag(name);
     renderApp();
+    const uc = state.local.useCases.find(u => u.name === name);
+    pushRightPanel(uc ?? null, tag);
   }
 
   function bindHelp() {
@@ -716,6 +718,43 @@ v16.1.0
     c.originalAppSet = new Set(c.selectedApps.keys());
     c.editMode = true; c.editName = name; c.saveResult = null; c.showChangeWarning = false;
     state.view = 'create'; renderApp(); fetchNextVersion();
+  }
+
+  // ── Right panel properties ────────────────────────────────────────────────
+
+  function renderProperties(uc, tag, info) {
+    const apps = uc?.apps ?? [];
+    const built = tag ? (info?.created ? new Date(info.created).toLocaleString() : '—') : null;
+    const row = (key, val) =>
+      `<div class="erp-p-row"><span class="erp-p-key">${esc(key)}</span><span class="erp-p-val">${val}</span></div>`;
+    return `
+      <div class="erp-p-header">${esc(uc?.name ?? '—')}</div>
+      ${row('Image', `<code>ghcr.io/cascadesteam/erp-${esc(uc?.name)}</code>`)}
+      ${row('Tag',   tag  ? `<code>${esc(tag)}</code>`  : '<span class="erp-p-muted">not built</span>')}
+      ${row('Built', built ?? '<span class="erp-p-muted">not built</span>')}
+      ${info?.size ? row('Size', esc(info.size)) : ''}
+      ${info?.arch ? row('Arch', esc(info.arch)) : ''}
+      <div class="erp-p-section">Apps (${apps.length})</div>
+      ${apps.map(a => {
+        const repo = (a.url ?? '').replace('https://github.com/', '');
+        return `<div class="erp-p-app"><code>${esc(repo)}</code><span class="erp-p-branch">@${esc(a.branch)}</span></div>`;
+      }).join('')}
+    `;
+  }
+
+  async function pushRightPanel(uc, tag) {
+    if (!window.__docwright?.setRightPanel) return;
+    // Push immediately with what we know
+    window.__docwright.setRightPanel(renderProperties(uc, tag, null), 'Properties');
+    // Then enrich with docker inspect data if a tag is selected
+    if (tag && uc) {
+      try {
+        const info = await fetch(`${API}/api/image-info?name=${encodeURIComponent(uc.name)}&tag=${encodeURIComponent(tag)}`).then(r => r.json());
+        if (state.sidebar.selUc === uc.name && state.sidebar.selTag === tag) {
+          window.__docwright.setRightPanel(renderProperties(uc, tag, info), 'Properties');
+        }
+      } catch { /* non-fatal */ }
+    }
   }
 
   // ── BUILD streaming ────────────────────────────────────────────────────────
@@ -939,6 +978,17 @@ v16.1.0
     .erp-ver-legend code { color:#58a6ff; background:rgba(88,166,255,.1); padding:1px 4px; border-radius:3px; }
     .erp-ver-legend em { color:#4caf50; }
     @keyframes spin { to { transform:rotate(360deg); } }
+    /* Properties panel (injected into DocWright's right panel) */
+    .erp-p-header { font-size:14px; font-weight:700; color:var(--fg,#e0e0f0); margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border,#1e2030); }
+    .erp-p-row { display:flex; justify-content:space-between; gap:8px; padding:4px 0; font-size:12px; border-bottom:1px solid rgba(255,255,255,.04); }
+    .erp-p-key { color:var(--muted,#666); flex-shrink:0; }
+    .erp-p-val { color:var(--fg,#ccc); text-align:right; word-break:break-all; }
+    .erp-p-val code { font-family:monospace; font-size:11px; color:#58a6ff; background:rgba(88,166,255,.1); padding:1px 4px; border-radius:3px; }
+    .erp-p-muted { color:var(--muted,#555); font-style:italic; }
+    .erp-p-section { font-size:10px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.4px; margin:10px 0 4px; }
+    .erp-p-app { padding:3px 0; font-size:11px; display:flex; gap:4px; align-items:baseline; }
+    .erp-p-app code { font-family:monospace; color:var(--fg,#ccc); font-size:11px; }
+    .erp-p-branch { color:var(--muted,#666); font-size:10px; font-family:monospace; }
   `;
   document.head.appendChild(style);
 

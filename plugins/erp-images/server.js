@@ -453,6 +453,28 @@ async function GET({ request, subpath }) {
     catch (e) { return new Response(e.message, { status: 500 }); }
   }
 
+  if (subpath === 'api/image-info') {
+    const name = sp.get('name');
+    const tag  = sp.get('tag');
+    if (!name) return new Response('missing name', { status: 400 });
+    const { execFileSync } = require('child_process');
+    const ref = tag ? `ghcr.io/cascadesteam/erp-${name}:${tag}` : `ghcr.io/cascadesteam/erp-${name}`;
+    try {
+      const raw  = execFileSync('docker', ['inspect', '--format', '{{json .}}', ref],
+        { encoding: 'utf-8', timeout: 5000 });
+      const info = JSON.parse(raw.trim().split('\n')[0]); // first element if array
+      const obj  = Array.isArray(info) ? info[0] : info;
+      return Response.json({
+        created: obj?.Created ?? null,
+        size:    obj?.Size    ? `${Math.round(obj.Size / (1024 * 1024))} MB` : null,
+        labels:  obj?.Config?.Labels ?? {},
+        arch:    obj?.Architecture ?? null,
+      });
+    } catch {
+      return Response.json({ created: null, size: null, labels: {}, arch: null });
+    }
+  }
+
   if (subpath === 'api/help') {
     const helpPath = path.join(VAULT_ROOT, '.erp-images-help.md');
     const content  = fs.existsSync(helpPath) ? fs.readFileSync(helpPath, 'utf-8') : null;
