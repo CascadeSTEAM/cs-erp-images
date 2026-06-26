@@ -565,6 +565,20 @@ async function POST({ request, subpath }) {
     }
   }
 
+  if (subpath === 'api/delete-tag') {
+    try {
+      const { name, tag } = await request.json();
+      if (!name || !tag) throw new Error('missing name or tag');
+      if (!/^[a-z][a-z0-9-]*$/.test(name)) throw new Error('invalid name');
+      const { execFileSync } = require('child_process');
+      const image = `ghcr.io/cascadesteam/erp-${name}:${tag}`;
+      execFileSync('docker', ['rmi', image], { encoding: 'utf-8', timeout: 30000 });
+      return Response.json({ deleted: image });
+    } catch (e) {
+      return Response.json({ error: e.message }, { status: 400 });
+    }
+  }
+
   if (subpath === 'api/save-local') {
     try {
       const body = await request.json();

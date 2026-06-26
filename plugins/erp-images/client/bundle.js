@@ -68,6 +68,7 @@ v16.1.0
       nextBuildTag: '', deployTag: '',
       building: false, buildLog: [], buildDone: false, buildFailed: false,
       confirmDelete: null, deleting: false,
+      confirmDeleteTag: null, deletingTag: false,
     },
   };
 
@@ -293,7 +294,21 @@ v16.1.0
         <div class="erp-status-card ${isBuilt ? 'erp-status-built' : 'erp-status-unbuilt'}">
           ${isBuilt
             ? (selTag
-                ? `<span class="erp-status-tag">✅ ${esc(selTag)}</span><span class="erp-status-note">selected · see Properties panel for details</span>`
+                ? `<div class="erp-status-tag-row">
+                 <span class="erp-status-tag">✅ ${esc(selTag)}</span>
+                 ${selSource === 'local' ? `<button class="erp-tag-del-btn" id="dp-del-tag" title="Remove this local image">🗑️ Remove</button>` : ''}
+               </div>
+               ${detail.confirmDeleteTag ? `
+               <div class="erp-tag-del-confirm">
+                 Remove local image <code>${esc(selTag)}</code>? The use case definition stays. Cannot be undone.
+                 <div class="erp-tag-del-confirm-btns">
+                   <button class="erp-btn erp-btn-ghost erp-btn-sm" id="dp-del-tag-cancel">Cancel</button>
+                   <button class="erp-btn erp-btn-danger erp-btn-sm" id="dp-del-tag-confirm" ${detail.deletingTag?'disabled':''}>
+                     ${detail.deletingTag ? '⏳ Removing…' : '🗑️ Remove'}
+                   </button>
+                 </div>
+               </div>` : ''}
+               <span class="erp-status-note">see Properties panel for details</span>`
                 : `<div class="erp-status-tags-row">
                     ${uc.builtTags.map(t => `
                       <label class="erp-tag-chip ${t===detail.deployTag?'erp-tag-chip-sel':''}">
@@ -630,6 +645,36 @@ v16.1.0
     document.getElementById('dp-deploy')?.addEventListener('click', () => {
       window.__docwright?.notify({ type:'info', title:'Deploy', message:'Ansible deployment coming in the next phase.' });
     });
+    document.getElementById('dp-del-tag')?.addEventListener('click', () => {
+      d.confirmDeleteTag = state.sidebar.selTag; renderApp();
+    });
+    document.getElementById('dp-del-tag-cancel')?.addEventListener('click', () => {
+      d.confirmDeleteTag = null; renderApp();
+    });
+    document.getElementById('dp-del-tag-confirm')?.addEventListener('click', async () => {
+      const name = state.sidebar.selUc;
+      const tag  = d.confirmDeleteTag;
+      d.deletingTag = true; renderApp();
+      try {
+        const res  = await fetch(`${API}/api/delete-tag`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, tag }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        d.confirmDeleteTag = null; d.deletingTag = false;
+        // Clear selection back to use case name (tag is gone)
+        state.sidebar.selTag = null; d.deployTag = '';
+        window.__docwright?.toast(`Removed ${tag}`, 3000);
+        await loadLocal();
+        loadNextBuildTag(name);
+      } catch (err) {
+        d.deletingTag = false;
+        window.__docwright?.notify({ type: 'error', title: 'Remove failed', message: err.message });
+        renderApp();
+      }
+    });
+
     document.getElementById('dp-delete-uc')?.addEventListener('click', () => {
       d.confirmDelete = state.sidebar.selUc; renderApp();
     });
@@ -925,8 +970,15 @@ v16.1.0
     .erp-status-card { border-radius:6px; padding:10px 14px; border:1px solid; }
     .erp-status-built { background:rgba(63,185,80,.05); border-color:rgba(63,185,80,.2); }
     .erp-status-unbuilt { background:rgba(255,255,255,.03); border-color:var(--border,#2a2a4a); }
+    .erp-status-tag-row { display:flex; align-items:center; gap:10px; }
     .erp-status-tag { font-size:13px; font-weight:600; color:#4caf50; font-family:monospace; }
-    .erp-status-note { font-size:11px; color:var(--muted,#666); margin-left:10px; }
+    .erp-status-note { font-size:11px; color:var(--muted,#666); }
+    .erp-tag-del-btn { background:none; border:1px solid rgba(218,54,51,.3); border-radius:4px; color:rgba(218,54,51,.7); font-size:11px; padding:2px 8px; cursor:pointer; }
+    .erp-tag-del-btn:hover { border-color:#da3633; color:#da3633; }
+    .erp-tag-del-confirm { margin-top:8px; padding:8px 10px; background:rgba(218,54,51,.07); border-radius:4px; border:1px solid rgba(218,54,51,.25); font-size:12px; color:var(--fg,#ccc); }
+    .erp-tag-del-confirm code { font-family:monospace; font-size:11px; color:#da3633; }
+    .erp-tag-del-confirm-btns { display:flex; gap:6px; margin-top:8px; }
+    .erp-btn-sm { padding:3px 10px; font-size:11px; }
     .erp-status-unbuilt-msg { font-size:12px; color:var(--muted,#666); }
     .erp-status-tags-row { display:flex; gap:6px; flex-wrap:wrap; }
     .erp-tag-chip { display:flex; align-items:center; gap:4px; padding:4px 10px; border-radius:12px; border:1px solid var(--border,#2a2a4a); cursor:pointer; font-size:12px; font-family:monospace; color:var(--muted,#888); }
