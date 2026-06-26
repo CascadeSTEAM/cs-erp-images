@@ -258,23 +258,28 @@ v16.1.0
     const { sidebar, detail, local } = state;
     const { selUc, selTag, selSource } = sidebar;
     const uc = local.useCases.find(u => u.name === selUc);
+    const isBuilt = uc && uc.builtTags.length > 0;
 
     return `
       <div class="erp-detail">
-        <div class="erp-detail-hdr">
-          <div class="erp-detail-title">
-            <span class="erp-detail-name">${esc(selUc)}</span>
+
+        ${/* ── Header: name + quick-delete ── */''}
+        <div class="erp-dh">
+          <div class="erp-dh-left">
+            <span class="erp-dh-name">${esc(selUc)}</span>
             ${selSource === 'remote' ? '<span class="erp-badge erp-badge-remote">GHCR</span>' : ''}
+            ${uc ? `<span class="erp-dh-meta">${uc.apps.length} app${uc.apps.length!==1?'s':''} · Frappe v${esc(sidebar.selTag?.match(/^v(\d+)/)?.[1] || '16')}</span>` : ''}
           </div>
-          ${uc ? `<div class="erp-detail-apps">${uc.apps.length} app${uc.apps.length!==1?'s':''}</div>` : ''}
+          ${selSource === 'local' ? `<button class="erp-btn-icon-danger" id="dp-delete-uc" title="Delete use case">🗑️</button>` : ''}
         </div>
 
+        ${/* ── Delete confirmation ── */''}
         ${detail.confirmDelete ? `
         <div class="erp-warn-dialog">
           <div class="erp-warn-dialog-icon">🗑️</div>
           <div class="erp-warn-dialog-body">
             <div class="erp-warn-dialog-title">Delete <code>${esc(selUc)}</code>?</div>
-            <div class="erp-warn-dialog-msg">Removes <code>use-cases/${esc(selUc)}/</code> and local Docker images. Use cases pushed to GitHub are protected.</div>
+            <div class="erp-warn-dialog-msg">Removes <code>use-cases/${esc(selUc)}/</code> and all local Docker images. Use cases pushed to GitHub are protected.</div>
           </div>
           <div class="erp-warn-dialog-actions">
             <button class="erp-btn erp-btn-ghost" id="dp-del-cancel">Cancel</button>
@@ -284,89 +289,101 @@ v16.1.0
           </div>
         </div>` : ''}
 
+        ${/* ── Status card: selected tag ── */''}
+        <div class="erp-status-card ${isBuilt ? 'erp-status-built' : 'erp-status-unbuilt'}">
+          ${isBuilt
+            ? (selTag
+                ? `<span class="erp-status-tag">✅ ${esc(selTag)}</span><span class="erp-status-note">selected · see Properties panel for details</span>`
+                : `<div class="erp-status-tags-row">
+                    ${uc.builtTags.map(t => `
+                      <label class="erp-tag-chip ${t===detail.deployTag?'erp-tag-chip-sel':''}">
+                        <input type="radio" name="dp-tag-pick" value="${esc(t)}" ${t===detail.deployTag?'checked':''}/>
+                        ${esc(t)}
+                      </label>`).join('')}
+                   </div>`)
+            : `<span class="erp-status-unbuilt-msg">○ No builds yet — build this use case to deploy it</span>`}
+        </div>
+
         ${selSource === 'local' ? renderLocalActions(uc) : renderRemoteActions()}
 
+        ${/* ── Build output ── */''}
         ${(detail.building || detail.buildLog.length > 0) ? `
         <div class="erp-build-output">
-          <div class="erp-build-status ${detail.buildDone ? 'erp-build-ok' : detail.buildFailed ? 'erp-build-fail' : 'erp-build-running'}">
+          <div class="erp-build-status ${detail.buildDone?'erp-build-ok':detail.buildFailed?'erp-build-fail':'erp-build-running'}">
             ${detail.buildDone ? '✅ Build complete' : detail.buildFailed ? '❌ Build failed' : '⏳ Building…'}
           </div>
           <pre class="erp-build-log" id="dp-log">${esc(detail.buildLog.join(''))}</pre>
         </div>` : ''}
+
       </div>`;
   }
 
   function renderLocalActions(uc) {
     const d = state.detail;
     const isBuilt = uc && uc.builtTags.length > 0;
-    const targetName = d.targets.find(t => t.id === d.target)?.name || d.target;
-    return `
-      <div class="erp-actions-grid">
-        <div class="erp-action-block">
-          <div class="erp-action-block-label">
-            Build
-            <span class="erp-ver-help" id="dp-ver-help-toggle" title="Version format help">ⓘ versioning</span>
-          </div>
-          <div id="dp-ver-legend" class="erp-ver-legend" style="display:none">
-            <strong>v{frappe}.{release}.{patch}</strong><br>
-            <span><code>frappe</code> Frappe major version — changes on Frappe upgrades</span><br>
-            <span><code>release</code> App list or breaking config changed — existing deployments may need rebuild</span><br>
-            <span><code>patch</code> Patch/security rebuild only — safe drop-in</span><br>
-            <em>e.g. v16.1.0 → v16.1.3 → v16.2.0</em>
-          </div>
-          <div class="erp-action-row">
+    const target = d.targets.find(t => t.id === d.target);
+    const targetName = target?.name || d.target;
+
+    return `<div class="erp-da">
+
+      ${/* ── Deploy (primary — shown first when built) ── */isBuilt ? `
+      <div class="erp-da-section">
+        <div class="erp-da-label">Deploy</div>
+        <div class="erp-da-deploy-row">
+          <span class="erp-da-to">to</span>
+          <select class="erp-select erp-target-select" id="dp-target-select">
+            ${d.targets.map(t=>`<option value="${esc(t.id)}" ${t.id===d.target?'selected':''}>${esc(t.name)}</option>`).join('')}
+          </select>
+          <button class="erp-btn erp-btn-primary erp-btn-deploy" id="dp-deploy"
+            ${(d.building||!d.deployTag)?'disabled':''}>
+            🚀 Deploy
+          </button>
+        </div>
+      </div>` : ''}
+
+      ${/* ── Build / Rebuild ── */''}
+      <div class="erp-da-section">
+        <div class="erp-da-label">
+          ${isBuilt ? 'Rebuild' : 'Build'}
+          <span class="erp-ver-help" id="dp-ver-help-toggle">ⓘ versioning</span>
+        </div>
+        <div id="dp-ver-legend" class="erp-ver-legend" style="display:none">
+          <strong>v{frappe}.{release}.{patch}</strong><br>
+          <span><code>frappe</code> Frappe major version</span><br>
+          <span><code>release</code> App list or config changed — may require redeploy</span><br>
+          <span><code>patch</code> Updates only — safe drop-in replacement</span><br>
+          <em>e.g. v16.1.0 → v16.1.3 → v16.2.0</em>
+        </div>
+        <div class="erp-da-build-row">
+          <div class="erp-da-next">
+            <span class="erp-da-next-label">Next tag</span>
             <code class="erp-tag-preview">${esc(d.nextBuildTag || '…')}</code>
-            <button class="erp-btn erp-btn-build" id="dp-build" ${(d.building||!d.nextBuildTag)?'disabled':''}>
-              ${d.building ? '⏳ Building…' : isBuilt ? '🔨 Rebuild' : '🔨 Build'}
-            </button>
           </div>
+          <button class="erp-btn erp-btn-build" id="dp-build"
+            ${(d.building||!d.nextBuildTag)?'disabled':''}>
+            ${d.building ? '⏳ Building…' : isBuilt ? '🔨 Rebuild' : '🔨 Build'}
+          </button>
         </div>
+      </div>
 
-        ${isBuilt ? `
-        <div class="erp-action-block">
-          <div class="erp-action-block-label">Deploy</div>
-          <div class="erp-action-row">
-            ${state.sidebar.selTag
-              ? `<code class="erp-tag-preview">${esc(d.deployTag)}</code>`
-              : uc.builtTags.length > 1
-                ? `<select class="erp-select erp-tag-select" id="dp-tag-select">
-                    ${uc.builtTags.map(t=>`<option value="${esc(t)}" ${t===d.deployTag?'selected':''}>${esc(t)}</option>`).join('')}
-                   </select>`
-                : `<code class="erp-tag-preview">${esc(d.deployTag)}</code>`}
-            <button class="erp-btn erp-btn-primary" id="dp-deploy" ${(d.building||!d.deployTag)?'disabled':''}>
-              🚀 ${esc(targetName)}
-            </button>
-          </div>
-        </div>` : ''}
-
-        <div class="erp-action-block">
-          <div class="erp-action-block-label">Target</div>
-          <div class="erp-target-list">
-            ${d.targets.map(t=>`
-              <label class="erp-target-opt ${t.id===d.target?'erp-target-sel':''}">
-                <input type="radio" name="dp-target" value="${esc(t.id)}" ${t.id===d.target?'checked':''}/>
-                ${esc(t.name)}
-              </label>`).join('')}
-          </div>
-        </div>
-
-        <div class="erp-action-block erp-action-danger">
-          <button class="erp-btn erp-btn-danger" id="dp-delete-uc">🗑️ Delete use case</button>
-        </div>
-      </div>`;
+    </div>`;
   }
 
   function renderRemoteActions() {
-    return `
-      <div class="erp-actions-grid">
-        <div class="erp-action-block">
-          <div class="erp-action-block-label">Deploy</div>
-          <div class="erp-action-row">
-            <code class="erp-tag-preview">${esc(state.sidebar.selTag || '—')}</code>
-            <button class="erp-btn erp-btn-primary" id="dp-deploy">🚀 Deploy</button>
-          </div>
+    const d = state.detail;
+    const target = d.targets.find(t => t.id === d.target);
+    return `<div class="erp-da">
+      <div class="erp-da-section">
+        <div class="erp-da-label">Deploy</div>
+        <div class="erp-da-deploy-row">
+          <span class="erp-da-to">to</span>
+          <select class="erp-select erp-target-select" id="dp-target-select">
+            ${d.targets.map(t=>`<option value="${esc(t.id)}" ${t.id===d.target?'selected':''}>${esc(t.name)}</option>`).join('')}
+          </select>
+          <button class="erp-btn erp-btn-primary" id="dp-deploy">🚀 Deploy</button>
         </div>
-      </div>`;
+      </div>
+    </div>`;
   }
 
   // ── CREATE VIEW ────────────────────────────────────────────────────────────
@@ -599,10 +616,17 @@ v16.1.0
       if (!state.sidebar.selUc || d.building || !d.nextBuildTag) return;
       startBuild(state.sidebar.selUc, d.nextBuildTag);
     });
-    document.getElementById('dp-tag-select')?.addEventListener('change', e => { d.deployTag = e.target.value; });
-    document.querySelectorAll('input[name="dp-target"]').forEach(r => {
-      r.addEventListener('change', e => { d.target = e.target.value; });
+    // Tag chips in status card (no specific sidebar tag selected)
+    document.querySelectorAll('input[name="dp-tag-pick"]').forEach(r => {
+      r.addEventListener('change', e => {
+        d.deployTag = e.target.value;
+        renderApp();
+        const uc = state.local.useCases.find(u => u.name === state.sidebar.selUc);
+        pushRightPanel(uc ?? null, e.target.value);
+      });
     });
+    // Target dropdown
+    document.getElementById('dp-target-select')?.addEventListener('change', e => { d.target = e.target.value; });
     document.getElementById('dp-deploy')?.addEventListener('click', () => {
       window.__docwright?.notify({ type:'info', title:'Deploy', message:'Ansible deployment coming in the next phase.' });
     });
@@ -889,19 +913,37 @@ v16.1.0
     .erp-help-editor { flex:1; background:var(--bg-2,#0d0d1e); border:none; color:var(--fg,#e0e0f0); font-family:monospace; font-size:12px; padding:16px; resize:none; width:100%; box-sizing:border-box; min-height:400px; }
     .erp-help-editor:focus { outline:none; }
     /* Detail */
-    .erp-detail { padding:20px 24px; }
-    .erp-detail-hdr { margin-bottom:16px; }
-    .erp-detail-name { font-size:18px; font-weight:700; color:var(--fg,#e0e0f0); }
-    .erp-detail-apps { font-size:12px; color:var(--muted,#666); margin-top:2px; }
-    .erp-badge-remote { font-size:10px; background:rgba(88,166,255,.15); color:#58a6ff; border:1px solid rgba(88,166,255,.3); padding:1px 6px; border-radius:8px; margin-left:6px; vertical-align:middle; }
-    .erp-actions-grid { display:flex; flex-direction:column; gap:16px; }
-    .erp-action-block { display:flex; flex-direction:column; gap:6px; }
-    .erp-action-block-label { font-size:11px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.4px; display:flex; align-items:center; gap:6px; }
-    .erp-action-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .erp-action-danger { margin-top:8px; padding-top:16px; border-top:1px solid var(--border,#1e2030); }
-    .erp-target-list { display:flex; gap:8px; flex-wrap:wrap; }
-    .erp-target-opt { display:flex; align-items:center; gap:4px; padding:4px 10px; border-radius:4px; border:1px solid var(--border,#2a2a4a); cursor:pointer; font-size:12px; }
-    .erp-target-sel { border-color:#4a6aba; background:rgba(88,166,255,.07); }
+    .erp-detail { padding:20px 24px; display:flex; flex-direction:column; gap:16px; }
+    .erp-dh { display:flex; align-items:flex-start; gap:8px; }
+    .erp-dh-left { flex:1; display:flex; flex-direction:column; gap:3px; }
+    .erp-dh-name { font-size:18px; font-weight:700; color:var(--fg,#e0e0f0); }
+    .erp-dh-meta { font-size:12px; color:var(--muted,#666); }
+    .erp-badge-remote { font-size:10px; background:rgba(88,166,255,.15); color:#58a6ff; border:1px solid rgba(88,166,255,.3); padding:1px 6px; border-radius:8px; }
+    .erp-btn-icon-danger { background:none; border:none; cursor:pointer; font-size:16px; opacity:.4; padding:2px; }
+    .erp-btn-icon-danger:hover { opacity:1; }
+    /* Status card */
+    .erp-status-card { border-radius:6px; padding:10px 14px; border:1px solid; }
+    .erp-status-built { background:rgba(63,185,80,.05); border-color:rgba(63,185,80,.2); }
+    .erp-status-unbuilt { background:rgba(255,255,255,.03); border-color:var(--border,#2a2a4a); }
+    .erp-status-tag { font-size:13px; font-weight:600; color:#4caf50; font-family:monospace; }
+    .erp-status-note { font-size:11px; color:var(--muted,#666); margin-left:10px; }
+    .erp-status-unbuilt-msg { font-size:12px; color:var(--muted,#666); }
+    .erp-status-tags-row { display:flex; gap:6px; flex-wrap:wrap; }
+    .erp-tag-chip { display:flex; align-items:center; gap:4px; padding:4px 10px; border-radius:12px; border:1px solid var(--border,#2a2a4a); cursor:pointer; font-size:12px; font-family:monospace; color:var(--muted,#888); }
+    .erp-tag-chip input { display:none; }
+    .erp-tag-chip:hover { border-color:#58a6ff; color:var(--fg,#ccc); }
+    .erp-tag-chip-sel { border-color:#58a6ff; color:#58a6ff; background:rgba(88,166,255,.1); }
+    /* Actions */
+    .erp-da { display:flex; flex-direction:column; gap:14px; }
+    .erp-da-section { display:flex; flex-direction:column; gap:8px; }
+    .erp-da-label { font-size:11px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.4px; display:flex; align-items:center; gap:6px; }
+    .erp-da-deploy-row { display:flex; align-items:center; gap:8px; }
+    .erp-da-to { font-size:12px; color:var(--muted,#666); }
+    .erp-target-select { flex:1; max-width:200px; font-size:12px; padding:6px 8px; background:var(--bg-2,#111128); border:1px solid var(--border,#2a2a4a); border-radius:6px; color:var(--fg,#e0e0f0); }
+    .erp-btn-deploy { min-width:120px; }
+    .erp-da-build-row { display:flex; align-items:center; gap:10px; }
+    .erp-da-next { display:flex; align-items:center; gap:6px; flex:1; }
+    .erp-da-next-label { font-size:11px; color:var(--muted,#666); flex-shrink:0; }
     /* Create */
     .erp-wrap { max-width:780px; margin:0 auto; padding:20px 24px 40px; }
     .erp-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
