@@ -216,7 +216,7 @@ async function createPR({ name, description, frappeMajor, apps }) {
 
 // ── Local save ───────────────────────────────────────────────────────────────
 
-function saveLocal({ name, description, frappeMajor, apps }) {
+function saveLocal({ name, description, frappeMajor, apps, majorBump = false }) {
   if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) throw new Error('Invalid use-case name');
   if (!apps || apps.length === 0) throw new Error('No apps selected');
 
@@ -240,9 +240,24 @@ function saveLocal({ name, description, frappeMajor, apps }) {
     .replace(/\{\{DESCRIPTION\}\}/g, description);
   fs.writeFileSync(path.join(ucDir, 'README.md'), readme, 'utf-8');
 
-  // Build command for the user to run
-  const buildCmd = `./scripts/build-local.sh ${name} v${frappeMajor}-r1`;
-  return { path: `use-cases/${name}`, buildCmd };
+  // Determine next tag — scan existing Docker images + built tags
+  const { execFileSync } = require('child_process');
+  let maxR = 0;
+  try {
+    const out = execFileSync('docker', [
+      'images', `ghcr.io/cascadesteam/erp-${name}`, '--format', '{{.Tag}}',
+    ], { encoding: 'utf-8', timeout: 5000 });
+    for (const tag of out.trim().split('\n').filter(Boolean)) {
+      const m = tag.match(/^v\d+-r(\d+)$/);
+      if (m) maxR = Math.max(maxR, parseInt(m[1], 10));
+    }
+  } catch { /* docker unavailable */ }
+  const nextR = maxR + 1;
+  const nextTag = `v${frappeMajor}-r${nextR}`;
+  const bumpType = majorBump ? 'major' : maxR === 0 ? 'initial' : 'minor';
+
+  const buildCmd = `./scripts/build-local.sh ${name} ${nextTag}`;
+  return { path: `use-cases/${name}`, buildCmd, nextTag, bumpType };
 }
 
 // ── Use-case list ────────────────────────────────────────────────────────────
@@ -353,6 +368,25 @@ async function GET({ request, subpath }) {
 
   if (subpath === 'api/use-cases') {
     return Response.json(listUseCases());
+  }
+
+  if (subpath === 'api/use-case') {
+    const name = sp.get('name');
+    if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
+      return new Response('invalid or missing name', { status: 400 });
+    }
+    const ucDir  = path.join(VAULT_ROOT, 'use-cases', name);
+    const appsPath = path.join(ucDir, 'apps.json');
+    if (!fs.existsSync(appsPath)) {
+      return new Response(`use-case "${name}" not found`, { status: 404 });
+    }
+    const apps = JSON.parse(fs.readFileSync(appsPath, 'utf-8'));
+    const readmePath = path.join(ucDir, 'README.md');
+    const readme = fs.existsSync(readmePath) ? fs.readFileSync(readmePath, 'utf-8') : '';
+    // Extract description — first non-empty line after the **Image:** line
+    const descMatch = readme.match(/\*\*Image:\*\*[^\n]+\n\n([^#\n][^\n]+)/);
+    const description = descMatch ? descMatch[1].trim() : '';
+    return Response.json({ name, apps, description });
   }
 
   if (subpath === 'api/targets') {

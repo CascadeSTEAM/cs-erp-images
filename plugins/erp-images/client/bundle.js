@@ -20,6 +20,11 @@
       saveResult: null,
       saving: false,
       tokenSet: false,
+      // Edit mode
+      editMode: false,
+      editName: null,           // original name (locked in edit mode)
+      originalAppSet: new Set(), // repo strings at edit-start, for change detection
+      showChangeWarning: false,  // pending save blocked by app-change warning
     },
 
     deploy: {
@@ -72,11 +77,14 @@
 
     return `<div class="eg-wrap">
       <div class="eg-header">
-        <span class="eg-header-icon">📦</span>
+        <span class="eg-header-icon">${c.editMode ? '✏️' : '📦'}</span>
         <div>
-          <div class="eg-header-title">Define Use Case</div>
-          <div class="eg-header-sub">Name your image, pick apps, save locally — then build and deploy from the Deploy tab</div>
+          <div class="eg-header-title">${c.editMode ? `Edit: ${esc(c.editName)}` : 'Define Use Case'}</div>
+          <div class="eg-header-sub">${c.editMode
+            ? 'Editing a local use case — changes will bump the image version'
+            : 'Name your image, pick apps, save locally — then build and deploy from the Deploy tab'}</div>
         </div>
+        ${c.editMode ? `<button class="eg-btn eg-btn-ghost" id="eg-cancel-edit" style="margin-left:auto">✕ Cancel</button>` : ''}
       </div>
 
       ${c.loadError ? `<div class="eg-error">Failed to load catalogue: ${esc(c.loadError)}</div>` : ''}
@@ -87,7 +95,9 @@
           <div class="eg-field">
             <label class="eg-label" for="eg-name">Name <span class="eg-hint">(kebab-case)</span></label>
             <input id="eg-name" class="eg-input" type="text" placeholder="my-use-case"
-              pattern="[a-z][a-z0-9-]*" value="${esc(c.name)}" autocomplete="off" spellcheck="false"/>
+              pattern="[a-z][a-z0-9-]*" value="${esc(c.name)}"
+              autocomplete="off" spellcheck="false"
+              ${c.editMode ? 'readonly style="opacity:.6;cursor:not-allowed"' : ''}/>
           </div>
           <div class="eg-field">
             <label class="eg-label" for="eg-frappe">Frappe Version</label>
@@ -116,13 +126,30 @@
         ${c.saveResult ? `
         <div class="eg-saved">
           <div class="eg-saved-title">✅ Saved → <code>${esc(c.saveResult.path)}</code></div>
-          <div class="eg-saved-note">Switching to Deploy tab…</div>
+          <div class="eg-saved-note">${c.editMode ? 'Updated.' : 'Switching to Deploy tab…'}</div>
+        </div>` : ''}
+
+        ${c.showChangeWarning ? `
+        <div class="eg-warn-dialog">
+          <div class="eg-warn-dialog-icon">⚠️</div>
+          <div class="eg-warn-dialog-body">
+            <div class="eg-warn-dialog-title">App list changed — this is a breaking change</div>
+            <div class="eg-warn-dialog-msg">
+              Anything deployed from the previous version of <strong>${esc(c.editName)}</strong> will
+              behave differently after this update. This requires a <strong>major version bump</strong>.
+              Existing deployments should be rebuilt from the new image before going live.
+            </div>
+          </div>
+          <div class="eg-warn-dialog-actions">
+            <button class="eg-btn eg-btn-ghost" id="eg-warn-cancel">Cancel</button>
+            <button class="eg-btn eg-btn-danger" id="eg-warn-confirm">Understood — save with major bump</button>
+          </div>
         </div>` : ''}
 
         <div class="eg-actions">
           <button type="button" id="eg-save" class="eg-btn eg-btn-save"
             ${(c.saving || !c.name || c.selectedApps.size === 0) ? 'disabled' : ''}>
-            ${c.saving ? '⏳ Saving…' : '💾 Save locally'}
+            ${c.saving ? '⏳ Saving…' : c.editMode ? '💾 Save changes' : '💾 Save locally'}
           </button>
         </div>
       </form>
@@ -195,16 +222,19 @@
         : `<div class="eg-uc-list">
           ${d.useCases.map(uc => {
             const built = uc.builtTags.length > 0;
-            return `<label class="eg-uc ${uc.name === d.selected ? 'eg-uc-selected' : ''}">
-              <input type="radio" name="eg-uc" value="${esc(uc.name)}" ${uc.name === d.selected ? 'checked' : ''}/>
-              <div class="eg-uc-info">
-                <span class="eg-uc-name">${esc(uc.name)}</span>
-                <span class="eg-uc-apps">${uc.apps.length} app${uc.apps.length !== 1 ? 's' : ''}</span>
-              </div>
-              <div class="eg-uc-build ${built ? 'eg-uc-built' : 'eg-uc-notbuilt'}">
-                ${built ? `✅ ${uc.builtTags[0]}` : '○ Not built'}
-              </div>
-            </label>`;
+            return `<div class="eg-uc-row">
+              <label class="eg-uc ${uc.name === d.selected ? 'eg-uc-selected' : ''}">
+                <input type="radio" name="eg-uc" value="${esc(uc.name)}" ${uc.name === d.selected ? 'checked' : ''}/>
+                <div class="eg-uc-info">
+                  <span class="eg-uc-name">${esc(uc.name)}</span>
+                  <span class="eg-uc-apps">${uc.apps.length} app${uc.apps.length !== 1 ? 's' : ''}</span>
+                </div>
+                <div class="eg-uc-build ${built ? 'eg-uc-built' : 'eg-uc-notbuilt'}">
+                  ${built ? `✅ ${uc.builtTags[0]}` : '○ Not built'}
+                </div>
+              </label>
+              ${uc.source === 'local' ? `<button class="eg-btn-edit" data-edit="${esc(uc.name)}" title="Edit this use case">✏️</button>` : ''}
+            </div>`;
           }).join('')}
         </div>`
       }
@@ -303,11 +333,36 @@
       });
     });
 
-    document.getElementById('eg-save')?.addEventListener('click', async () => {
-      if (!c.name || c.selectedApps.size === 0) return;
-      c.saving = true;
-      c.saveResult = null;
+    document.getElementById('eg-cancel-edit')?.addEventListener('click', () => {
+      c.editMode = false; c.editName = null;
+      c.originalAppSet = new Set(); c.showChangeWarning = false;
+      state.view = 'deploy';
       renderApp();
+    });
+
+    document.getElementById('eg-warn-cancel')?.addEventListener('click', () => {
+      c.showChangeWarning = false; renderApp();
+    });
+
+    document.getElementById('eg-warn-confirm')?.addEventListener('click', () => {
+      c.showChangeWarning = false;
+      doSave(true); // confirmed major bump
+    });
+
+    document.getElementById('eg-save')?.addEventListener('click', () => {
+      if (!c.name || c.selectedApps.size === 0) return;
+      if (c.editMode) {
+        // Check if app set changed
+        const currentSet = new Set(c.selectedApps.keys());
+        const changed = currentSet.size !== c.originalAppSet.size ||
+          [...currentSet].some(r => !c.originalAppSet.has(r));
+        if (changed) { c.showChangeWarning = true; renderApp(); return; }
+      }
+      doSave(false);
+    });
+
+    async function doSave(majorBump) {
+      c.saving = true; c.saveResult = null; renderApp();
       try {
         const res = await fetch(`${API}/api/save-local`, {
           method: 'POST',
@@ -316,26 +371,32 @@
             name: c.name, description: c.description,
             frappeMajor: c.frappeMajor,
             apps: [...c.selectedApps.values()],
+            majorBump,
           }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
         c.saveResult = data;
         c.saving = false;
+        if (c.editMode) {
+          c.originalAppSet = new Set(c.selectedApps.keys()); // reset baseline
+          deployLoaded = false; // force deploy list refresh
+        }
         renderApp();
-        // Auto-switch to deploy with this use case pre-selected
-        setTimeout(() => {
-          state.deploy.selected = c.name;
-          state.view = 'deploy';
-          loadDeployIfNeeded();
-          renderApp();
-        }, 800);
+        if (!c.editMode) {
+          setTimeout(() => {
+            state.deploy.selected = c.name;
+            state.view = 'deploy';
+            loadDeployIfNeeded();
+            renderApp();
+          }, 800);
+        }
       } catch (err) {
         c.saving = false;
         c.loadError = `Save failed: ${err.message}`;
         renderApp();
       }
-    });
+    }
   }
 
   // ── DEPLOY events ──────────────────────────────────────────────────────────
@@ -377,6 +438,14 @@
       if (!d.selected || d.building) return;
       const tag = d.tag || 'v16-r1';
       startBuild(d.selected, tag);
+    });
+
+    document.querySelectorAll('.eg-btn-edit').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const name = btn.dataset.edit;
+        await loadUseCase(name);
+      });
     });
 
     document.getElementById('dp-deploy')?.addEventListener('click', () => {
@@ -453,6 +522,43 @@
       d.loadError = err.message;
       renderApp();
     });
+  }
+
+  async function loadUseCase(name) {
+    const res = await fetch(`${API}/api/use-case?name=${encodeURIComponent(name)}`);
+    if (!res.ok) { window.__docwright?.toast(`Could not load ${name}`, 3000); return; }
+    const data = await res.json();
+    const c = state.create;
+
+    // Populate create state
+    c.name = data.name;
+    c.description = data.description || '';
+    c.selectedApps.clear();
+
+    // Map apps.json entries back to catalogue-style {repo, branch, name}
+    for (const app of data.apps) {
+      const repo = (app.url || '').replace('https://github.com/', '');
+      if (repo) {
+        // Try to find display name from catalogue
+        let displayName = repo.split('/')[1] || repo;
+        for (const cat of c.catalogue) {
+          const found = cat.apps.find(a => a.repo === repo);
+          if (found) { displayName = found.name; break; }
+        }
+        c.selectedApps.set(repo, { repo, branch: app.branch, name: displayName });
+      }
+    }
+
+    // Snapshot original app set for change detection
+    c.originalAppSet = new Set(c.selectedApps.keys());
+    c.editMode = true;
+    c.editName = name;
+    c.saveResult = null;
+    c.showChangeWarning = false;
+
+    state.view = 'create';
+    renderApp();
+    fetchNextVersion();
   }
 
   async function fetchNextVersion() {
@@ -562,6 +668,18 @@
     html[data-theme="light"] .eg-input,.eg-select,.eg-textarea { background:#f5f5ff; border-color:#c0c0e0; color:#1a1a2e; }
     html[data-theme="light"] .eg-app:hover { background:#eaeaff; }
     html[data-theme="light"] .eg-app-checked { background:#dde8ff; border-color:#aaccee; }
+    .eg-uc-row { display:flex; align-items:stretch; gap:4px; }
+    .eg-uc-row .eg-uc { flex:1; }
+    .eg-btn-edit { background:none; border:1px solid var(--border,#2a2a4a); border-radius:6px; padding:0 10px; cursor:pointer; font-size:14px; color:var(--muted,#888); flex-shrink:0; }
+    .eg-btn-edit:hover { border-color:#58a6ff; color:#58a6ff; }
+    .eg-warn-dialog { background:rgba(218,54,51,.07); border:1px solid rgba(218,54,51,.4); border-radius:8px; padding:16px; display:flex; gap:12px; align-items:flex-start; margin:8px 0; }
+    .eg-warn-dialog-icon { font-size:22px; flex-shrink:0; }
+    .eg-warn-dialog-body { flex:1; }
+    .eg-warn-dialog-title { font-size:13px; font-weight:700; color:#da3633; margin-bottom:6px; }
+    .eg-warn-dialog-msg { font-size:12px; color:var(--fg,#ccc); line-height:1.6; }
+    .eg-warn-dialog-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+    .eg-btn-danger { background:#5a1a1a; border-color:#da3633; color:#ff8080; }
+    .eg-btn-danger:hover { background:#6a2020; }
     html[data-theme="light"] .eg-uc,.eg-target { border-color:#d0d0e0; }
     html[data-theme="light"] .eg-uc-selected,.eg-target-selected { border-color:#4a6cf7; background:#eef3ff; }
   `;
