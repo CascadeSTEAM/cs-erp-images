@@ -82,13 +82,20 @@ v16.1.0
   // ── Top-level render ───────────────────────────────────────────────────────
 
   function renderApp() {
-    const el = root(); if (!el) return;
-    el.innerHTML = `
-      <div class="erp-layout">
-        <div class="erp-panel" id="erp-panel">${renderSidebar()}</div>
-        <div class="erp-main"  id="erp-main">${renderMain()}</div>
-      </div>`;
+    // Main content into #plugin-root
+    const mainEl = root();
+    if (mainEl) mainEl.innerHTML = renderMain();
+
+    // Sidebar into DocWright's panel slot (mounted by layout.svelte)
+    mountSidebar();
+
     bindAll();
+  }
+
+  function mountSidebar() {
+    const el = document.getElementById('erp-images-sidebar-root');
+    if (el) { el.innerHTML = renderSidebar(); return true; }
+    return false;
   }
 
   function renderMain() {
@@ -789,12 +796,8 @@ v16.1.0
 
   const style = document.createElement('style');
   style.textContent = `
-    /* Layout */
-    #plugin-root { display:flex; flex-direction:column; height:100%; }
-    .erp-layout  { display:flex; flex:1; min-height:0; height:100%; }
-    .erp-panel   { width:220px; min-width:180px; flex-shrink:0; border-right:1px solid var(--border,#1e2030); overflow-y:auto; background:var(--bg,#111); }
-    .erp-main    { flex:1; overflow-y:auto; }
-    .erp-panel-inner { display:flex; flex-direction:column; gap:0; padding:8px 0; }
+    /* Sidebar (rendered into DocWright's left panel) */
+    .erp-panel-inner { display:flex; flex-direction:column; gap:0; padding:8px 0; height:100%; }
     /* Sidebar */
     .erp-new-btn { width:calc(100% - 16px); margin:0 8px 10px; padding:7px; background:#1e3a6e; border:1px solid #2a5aba; border-radius:6px; color:#7ab0ff; font-size:12px; font-weight:600; cursor:pointer; }
     .erp-new-btn:hover { background:#253e7e; }
@@ -930,7 +933,7 @@ v16.1.0
   // ── Init ───────────────────────────────────────────────────────────────────
 
   async function init() {
-    // Load help content, catalogue, and local use cases in parallel
+    renderApp(); // render immediately with loading state
     const [helpData] = await Promise.all([
       fetch(`${API}/api/help`).then(r => r.json()).catch(() => ({content:null})),
       initCreate(),
@@ -938,6 +941,8 @@ v16.1.0
     ]);
     state.help.content = helpData.content;
     renderApp();
+    // Retry sidebar mount — DocWright's panel may render after the bundle fires
+    if (!mountSidebar()) setTimeout(() => { mountSidebar(); }, 150);
   }
 
   init();
