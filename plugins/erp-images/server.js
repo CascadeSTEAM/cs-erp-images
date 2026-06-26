@@ -214,6 +214,42 @@ async function createPR({ name, description, frappeMajor, apps }) {
   return { pr_url: pr.html_url, tag, branch: branchName };
 }
 
+// ── Versioning ────────────────────────────────────────────────────────────────
+
+function detectBase(apps) {
+  const hasErpNext = apps.some(a => (a.url || a.repo || '').includes('frappe/erpnext'));
+  return hasErpNext ? 'erpnext' : 'frappe';
+}
+
+function calcNextTag(name, frappeMajor, apps, majorBump) {
+  const base   = detectBase(apps);
+  const prefix = `${base}${frappeMajor}`;
+  const { execFileSync } = require('child_process');
+  const TAG_RE = /^[a-z]+\d+-r(\d+)\.(\d+)$/;
+
+  let maxR = 0, maxB = 0, hasTag = false;
+  try {
+    const out = execFileSync('docker', [
+      'images', `ghcr.io/cascadesteam/erp-${name}`, '--format', '{{.Tag}}',
+    ], { encoding: 'utf-8', timeout: 5000 });
+    for (const tag of out.trim().split('\n').filter(Boolean)) {
+      const m = tag.match(TAG_RE);
+      if (m) {
+        hasTag = true;
+        const r = parseInt(m[1], 10), b = parseInt(m[2], 10);
+        if (r > maxR || (r === maxR && b > maxB)) { maxR = r; maxB = b; }
+      }
+    }
+  } catch { /* docker unavailable */ }
+
+  let nextR, nextB, bumpType;
+  if (!hasTag)      { nextR = 1;       nextB = 0;       bumpType = 'initial'; }
+  else if (majorBump) { nextR = maxR + 1; nextB = 0;       bumpType = 'release'; }
+  else              { nextR = maxR;    nextB = maxB + 1; bumpType = 'build';   }
+
+  return { tag: `${prefix}-r${nextR}.${nextB}`, base, major: frappeMajor, release: nextR, build: nextB, bumpType };
+}
+
 // ── Local save ───────────────────────────────────────────────────────────────
 
 function saveLocal({ name, description, frappeMajor, apps, majorBump = false }) {
@@ -240,24 +276,9 @@ function saveLocal({ name, description, frappeMajor, apps, majorBump = false }) 
     .replace(/\{\{DESCRIPTION\}\}/g, description);
   fs.writeFileSync(path.join(ucDir, 'README.md'), readme, 'utf-8');
 
-  // Determine next tag — scan existing Docker images + built tags
-  const { execFileSync } = require('child_process');
-  let maxR = 0;
-  try {
-    const out = execFileSync('docker', [
-      'images', `ghcr.io/cascadesteam/erp-${name}`, '--format', '{{.Tag}}',
-    ], { encoding: 'utf-8', timeout: 5000 });
-    for (const tag of out.trim().split('\n').filter(Boolean)) {
-      const m = tag.match(/^v\d+-r(\d+)$/);
-      if (m) maxR = Math.max(maxR, parseInt(m[1], 10));
-    }
-  } catch { /* docker unavailable */ }
-  const nextR = maxR + 1;
-  const nextTag = `v${frappeMajor}-r${nextR}`;
-  const bumpType = majorBump ? 'major' : maxR === 0 ? 'initial' : 'minor';
-
-  const buildCmd = `./scripts/build-local.sh ${name} ${nextTag}`;
-  return { path: `use-cases/${name}`, buildCmd, nextTag, bumpType };
+  const { tag, base, major, release, build, bumpType } = calcNextTag(name, frappeMajor, apps, majorBump);
+  const buildCmd = `./scripts/build-local.sh ${name} ${tag}`;
+  return { path: `use-cases/${name}`, buildCmd, nextTag: tag, base, major, release, build, bumpType };
 }
 
 // ── Use-case list ────────────────────────────────────────────────────────────

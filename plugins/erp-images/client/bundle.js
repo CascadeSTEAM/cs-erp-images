@@ -126,7 +126,15 @@
         ${c.saveResult ? `
         <div class="eg-saved">
           <div class="eg-saved-title">✅ Saved → <code>${esc(c.saveResult.path)}</code></div>
-          <div class="eg-saved-note">Updated.</div>
+          <div class="eg-saved-tag">
+            Next tag: <code>${esc(c.saveResult.nextTag)}</code>
+            <span class="eg-bump-badge eg-bump-${esc(c.saveResult.bumpType)}">
+              ${{ initial: '🟢 Initial build',
+                  build:   '⚡ Build update — patches, no breaking changes',
+                  release: '⚠️ Release — possible breaking changes or additional config required',
+                }[c.saveResult.bumpType] || c.saveResult.bumpType}
+            </span>
+          </div>
         </div>` : ''}
 
         ${c.showChangeWarning ? `
@@ -624,9 +632,13 @@
     .eg-preview { background:var(--bg-2,#0d0d1e); border:1px solid var(--border,#2a2a4a); border-radius:6px; overflow:hidden; }
     .eg-preview-meta { font-size:12px; color:var(--muted,#888); padding:8px 12px; border-bottom:1px solid var(--border,#2a2a4a); }
     .eg-code { margin:0; padding:12px; font-size:12px; font-family:monospace; overflow-x:auto; color:var(--fg,#cce0ff); white-space:pre; }
-    .eg-saved { background:rgba(63,185,80,.07); border:1px solid rgba(63,185,80,.25); border-radius:6px; padding:12px 16px; display:flex; flex-direction:column; gap:4px; }
+    .eg-saved { background:rgba(63,185,80,.07); border:1px solid rgba(63,185,80,.25); border-radius:6px; padding:12px 16px; display:flex; flex-direction:column; gap:6px; }
     .eg-saved-title { font-size:13px; font-weight:600; color:var(--fg,#e0e0f0); }
-    .eg-saved-note { font-size:11px; color:var(--muted,#666); }
+    .eg-saved-tag { font-size:12px; color:var(--muted,#888); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .eg-bump-badge { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:500; }
+    .eg-bump-initial { background:rgba(63,185,80,.15); color:#4caf50; border:1px solid rgba(63,185,80,.3); }
+    .eg-bump-build   { background:rgba(88,166,255,.12); color:#58a6ff; border:1px solid rgba(88,166,255,.3); }
+    .eg-bump-release { background:rgba(210,153,34,.12); color:#d4a017; border:1px solid rgba(210,153,34,.3); }
     .eg-actions { display:flex; align-items:center; gap:12px; padding-top:4px; }
     .eg-btn { padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid; }
     .eg-btn-save { background:none; border-color:#3a5a3a; color:#4caf50; }
