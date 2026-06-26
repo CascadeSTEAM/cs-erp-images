@@ -583,13 +583,17 @@
 
     es.addEventListener('done', (e) => {
       const { code } = JSON.parse(e.data);
+      const justBuilt = d.nextBuildTag; // capture before recalc
       d.building = false;
       d.buildDone = code === 0;
       d.buildFailed = code !== 0;
       es.close();
-      // Refresh build status for this use case
       fetch(`${API}/api/use-cases`).then(r => r.json()).then(ucs => {
         d.useCases = ucs;
+        if (code === 0) {
+          d.deployTag = justBuilt;      // the tag we just built is now deployable
+          loadNextBuildTag(d.selected); // recalculate what comes next
+        }
         renderApp();
       }).catch(() => renderApp());
     });
