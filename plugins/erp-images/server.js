@@ -453,6 +453,34 @@ async function GET({ request, subpath }) {
     catch (e) { return new Response(e.message, { status: 500 }); }
   }
 
+  if (subpath === 'api/help') {
+    const helpPath = path.join(VAULT_ROOT, '.erp-images-help.md');
+    const content  = fs.existsSync(helpPath) ? fs.readFileSync(helpPath, 'utf-8') : null;
+    return Response.json({ content, hasCustom: content !== null });
+  }
+
+  if (subpath === 'api/remote-images') {
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
+    if (!token) return Response.json({ available: false, packages: [] });
+    try {
+      const pkgs = await githubRequest('GET', `/orgs/${GH_ORG}/packages?package_type=container&per_page=50`);
+      const erpPkgs = Array.isArray(pkgs) ? pkgs.filter(p => p.name?.startsWith('erp-')) : [];
+      const result = [];
+      for (const pkg of erpPkgs) {
+        const enc  = encodeURIComponent(pkg.name);
+        const vers = await githubRequest('GET', `/orgs/${GH_ORG}/packages/container/${enc}/versions?per_page=50`);
+        const tags = (Array.isArray(vers) ? vers : [])
+          .flatMap(v => v.metadata?.container?.tags ?? [])
+          .filter(t => /^v\d+\.\d+\.\d+$/.test(t))
+          .sort().reverse();
+        result.push({ name: pkg.name.replace('erp-', ''), fullName: pkg.name, tags });
+      }
+      return Response.json({ available: true, packages: result });
+    } catch (e) {
+      return Response.json({ available: false, error: e.message, packages: [] });
+    }
+  }
+
   return new Response(`erp-images: unknown path "${subpath}"`, { status: 404 });
 }
 
@@ -465,6 +493,13 @@ async function POST({ request, subpath }) {
     } catch (e) {
       return Response.json({ error: e.message }, { status: 400 });
     }
+  }
+
+  if (subpath === 'api/help') {
+    const body    = await request.json();
+    const helpPath = path.join(VAULT_ROOT, '.erp-images-help.md');
+    fs.writeFileSync(helpPath, body.content ?? '', 'utf-8');
+    return Response.json({ ok: true });
   }
 
   if (subpath === 'api/delete-local') {

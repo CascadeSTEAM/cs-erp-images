@@ -3,72 +3,348 @@
 
   const API = '/api/plugin/erp-images';
 
+  const DEFAULT_HELP = `# 🐳 ERP Images
+
+Manage Frappe/ERPNext Docker images for your environments — all from inside DocWright.
+
+## What this plugin does
+
+- **Create use cases** — define a named combination of Frappe apps (e.g. *helpdesk*, *cs*, *nonprofit*)
+- **Build locally** — test your image on this machine before publishing
+- **Version automatically** — tags follow \`v{frappe}.{release}.{patch}\` (see ⓘ versioning in the Deploy panel)
+- **Deploy** — push to a configured target environment via Ansible (coming soon)
+- **Publish** — open a GitHub PR to add the use case to the shared image registry
+
+## Getting started
+
+1. Click **➕ New Use Case** in the left panel
+2. Name it, pick apps, click **💾 Save locally**
+3. Select it in the left panel and click **🔨 Build**
+4. Once built, click **🚀 Deploy** to push it to a target
+
+## Tag format
+
+\`\`\`
+v16.1.0
+│  │ └── patch  — rebuild with dependency/security updates only (safe drop-in)
+│  └────── release — app list changed or breaking config (existing deploys may need rebuild)
+└────────── Frappe major version
+\`\`\`
+
+---
+*Edit this page with the ✏️ button above.*`;
+
   // ── State ──────────────────────────────────────────────────────────────────
 
   const state = {
-    view: 'create',   // 'create' | 'deploy'
+    view: 'help',   // 'help' | 'create' | 'detail'
 
-    create: {
-      phase: 'loading',  // loading | form | saving | saved
-      catalogue: [],
-      name: '',
-      description: '',
-      frappeMajor: '16',
-      selectedApps: new Map(),
-      nextVersion: null,
-      loadError: null,
-      saveResult: null,
-      saving: false,
-      tokenSet: false,
-      // Edit mode
-      editMode: false,
-      editName: null,           // original name (locked in edit mode)
-      originalAppSet: new Set(), // repo strings at edit-start, for change detection
-      showChangeWarning: false,  // pending save blocked by app-change warning
+    sidebar: {
+      localOpen:      true,
+      remoteOpen:     false,
+      localExpanded:  new Set(),
+      remoteExpanded: new Set(),
+      selUc:    null,   // selected use-case name
+      selTag:   null,   // selected tag string
+      selSource: null,  // 'local' | 'remote'
     },
 
-    deploy: {
-      loading: true,
-      useCases: [],    // [{name, apps, builtTags, source}]
-      targets: [],     // [{id, name, type, description}]
-      selected: null,   // use case name
-      target: 'local',
-      nextBuildTag: '', // next tag to build (patch bump of latest)
-      deployTag: '',    // existing built tag selected for deploy
-      building: false,
-      buildLog: [],
-      buildDone: false,
-      buildFailed: false,
-      loadError: null,
-      confirmDelete: null,  // name pending delete confirmation
-      deleting: false,
+    local:  { loading: true,  useCases: [], error: null },
+    remote: { loading: false, packages: [], available: false, error: null, loaded: false },
+
+    help: { content: null, editing: false, editContent: '', saving: false },
+
+    create: {
+      phase: 'loading',
+      catalogue: [], name: '', description: '', frappeMajor: '16',
+      selectedApps: new Map(), nextVersion: null,
+      loadError: null, saveResult: null, saving: false,
+      editMode: false, editName: null,
+      originalAppSet: new Set(), showChangeWarning: false,
+    },
+
+    detail: {
+      targets: [], target: 'local',
+      nextBuildTag: '', deployTag: '',
+      building: false, buildLog: [], buildDone: false, buildFailed: false,
+      confirmDelete: null, deleting: false,
     },
   };
 
   // ── DOM helpers ────────────────────────────────────────────────────────────
 
   function esc(s) {
-    return String(s ?? '')
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
-  function root() { return document.getElementById('plugin-root'); }
+  const root = () => document.getElementById('plugin-root');
 
   // ── Top-level render ───────────────────────────────────────────────────────
 
   function renderApp() {
-    const el = root();
-    if (!el) return;
-    el.innerHTML = renderTabs() +
-      (state.view === 'create' ? renderCreateView() : renderDeployView());
-    state.view === 'create' ? bindCreateEvents() : bindDeployEvents();
+    const el = root(); if (!el) return;
+    el.innerHTML = `
+      <div class="erp-layout">
+        <div class="erp-panel" id="erp-panel">${renderSidebar()}</div>
+        <div class="erp-main"  id="erp-main">${renderMain()}</div>
+      </div>`;
+    bindAll();
   }
 
-  function renderTabs() {
+  function renderMain() {
+    if (state.view === 'create') return renderCreateView();
+    if (state.view === 'detail') return renderDetailView();
+    return renderHelpView();
+  }
+
+  // ── SIDEBAR ────────────────────────────────────────────────────────────────
+
+  function renderSidebar() {
+    const { sidebar, local, remote } = state;
     return `
-      <div class="eg-tabs">
-        <button class="eg-tab ${state.view === 'create' ? 'eg-tab-active' : ''}" data-view="create">📦 Create</button>
-        <button class="eg-tab ${state.view === 'deploy' ? 'eg-tab-active' : ''}" data-view="deploy">🚀 Deploy</button>
+      <div class="erp-panel-inner">
+        <button class="erp-new-btn" id="erp-new">➕ New Use Case</button>
+
+        <div class="erp-s-section">
+          <div class="erp-s-hdr" data-toggle="local">
+            <span class="erp-caret">${sidebar.localOpen ? '▼' : '▶'}</span>
+            Local
+            ${local.loading ? '<span class="erp-s-spin">⟳</span>' : `<span class="erp-s-count">${local.useCases.length}</span>`}
+          </div>
+          ${sidebar.localOpen ? renderLocalList() : ''}
+        </div>
+
+        <div class="erp-s-section">
+          <div class="erp-s-hdr" data-toggle="remote">
+            <span class="erp-caret">${sidebar.remoteOpen ? '▼' : '▶'}</span>
+            Remote (GHCR)
+            ${remote.loading ? '<span class="erp-s-spin">⟳</span>'
+              : remote.available ? `<span class="erp-s-count">${remote.packages.length}</span>`
+              : '<span class="erp-s-muted">token required</span>'}
+          </div>
+          ${sidebar.remoteOpen ? renderRemoteList() : ''}
+        </div>
+      </div>`;
+  }
+
+  function renderLocalList() {
+    const { local, sidebar } = state;
+    if (local.error) return `<div class="erp-s-error">${esc(local.error)}</div>`;
+    if (!local.useCases.length) return `<div class="erp-s-empty">No local use cases yet</div>`;
+    return local.useCases.map(uc => {
+      const exp   = sidebar.localExpanded.has(uc.name);
+      const isSel = sidebar.selSource === 'local' && sidebar.selUc === uc.name;
+      return `
+        <div class="erp-s-uc">
+          <div class="erp-s-uc-hdr ${isSel && !sidebar.selTag ? 'erp-s-sel' : ''}"
+               data-uc="${esc(uc.name)}" data-source="local">
+            <span class="erp-caret">${exp ? '▼' : '▶'}</span>
+            <span class="erp-s-uc-name">${esc(uc.name)}</span>
+            <button class="erp-s-icon" data-edit="${esc(uc.name)}" title="Edit">✏️</button>
+            <button class="erp-s-icon erp-s-del" data-del="${esc(uc.name)}" title="Delete">🗑️</button>
+          </div>
+          ${exp ? `
+            <div class="erp-s-tags">
+              ${uc.builtTags.length
+                ? uc.builtTags.map(t => `
+                  <div class="erp-s-tag ${sidebar.selSource==='local'&&sidebar.selUc===uc.name&&sidebar.selTag===t ? 'erp-s-sel' : ''}"
+                       data-uc="${esc(uc.name)}" data-tag="${esc(t)}" data-source="local">${esc(t)}</div>`
+                ).join('')
+                : `<div class="erp-s-no-tags">No builds yet — select to build</div>`}
+            </div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
+  function renderRemoteList() {
+    const { remote } = state;
+    if (!remote.available) return `<div class="erp-s-empty">Add <code>GITHUB_TOKEN</code> to <code>.env</code> to browse GHCR images</div>`;
+    if (remote.error)     return `<div class="erp-s-error">${esc(remote.error)}</div>`;
+    if (!remote.packages.length) return `<div class="erp-s-empty">No erp-* packages found</div>`;
+    return remote.packages.map(pkg => {
+      const exp   = state.sidebar.remoteExpanded.has(pkg.name);
+      const isSel = state.sidebar.selSource === 'remote' && state.sidebar.selUc === pkg.name;
+      return `
+        <div class="erp-s-uc">
+          <div class="erp-s-uc-hdr ${isSel && !state.sidebar.selTag ? 'erp-s-sel' : ''}"
+               data-uc="${esc(pkg.name)}" data-source="remote">
+            <span class="erp-caret">${exp ? '▼' : '▶'}</span>
+            <span class="erp-s-uc-name">${esc(pkg.name)}</span>
+          </div>
+          ${exp ? `
+            <div class="erp-s-tags">
+              ${pkg.tags.map(t => `
+                <div class="erp-s-tag ${state.sidebar.selSource==='remote'&&state.sidebar.selUc===pkg.name&&state.sidebar.selTag===t ? 'erp-s-sel' : ''}"
+                     data-uc="${esc(pkg.name)}" data-tag="${esc(t)}" data-source="remote">${esc(t)}</div>`
+              ).join('')}
+            </div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
+  // ── HELP VIEW ──────────────────────────────────────────────────────────────
+
+  function renderHelpView() {
+    const h = state.help;
+    const content = h.content ?? DEFAULT_HELP;
+    if (h.editing) {
+      return `
+        <div class="erp-help">
+          <div class="erp-help-toolbar">
+            <span class="erp-help-title">Edit help page</span>
+            <button class="erp-btn erp-btn-ghost" id="help-cancel">Cancel</button>
+            <button class="erp-btn erp-btn-save" id="help-save" ${h.saving ? 'disabled' : ''}>
+              ${h.saving ? '⏳ Saving…' : '💾 Save'}
+            </button>
+            ${h.content !== null
+              ? `<button class="erp-btn erp-btn-ghost" id="help-reset">↺ Reset to default</button>`
+              : ''}
+          </div>
+          <textarea class="erp-help-editor" id="help-editor">${esc(content)}</textarea>
+        </div>`;
+    }
+    return `
+      <div class="erp-help">
+        <div class="erp-help-toolbar">
+          <span class="erp-help-title">ERP Images</span>
+          <button class="erp-btn erp-btn-ghost" id="help-edit">✏️ Edit</button>
+        </div>
+        <div class="erp-help-body">${renderMarkdown(content)}</div>
+      </div>`;
+  }
+
+  function renderMarkdown(md) {
+    // Minimal markdown → HTML (headings, code blocks, inline code, bold, paragraphs)
+    return md
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/```([\s\S]*?)```/g, (_,c) => `<pre class="erp-code">${c.trim()}</pre>`)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^#{4} (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^#{3} (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^#{2} (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>\n?)+/g, s => `<ul>${s}</ul>`)
+      .replace(/^---$/gm, '<hr>')
+      .replace(/\n\n+/g, '</p><p>')
+      .replace(/^(?!<[hup]|<li|<pre|<hr)(.+)$/gm, '$1')
+      .replace(/^(.)/m, '<p>$1')
+      + '</p>';
+  }
+
+  // ── DETAIL VIEW ────────────────────────────────────────────────────────────
+
+  function renderDetailView() {
+    const { sidebar, detail, local } = state;
+    const { selUc, selTag, selSource } = sidebar;
+    const uc = local.useCases.find(u => u.name === selUc);
+
+    return `
+      <div class="erp-detail">
+        <div class="erp-detail-hdr">
+          <div class="erp-detail-title">
+            <span class="erp-detail-name">${esc(selUc)}</span>
+            ${selSource === 'remote' ? '<span class="erp-badge erp-badge-remote">GHCR</span>' : ''}
+          </div>
+          ${uc ? `<div class="erp-detail-apps">${uc.apps.length} app${uc.apps.length!==1?'s':''}</div>` : ''}
+        </div>
+
+        ${detail.confirmDelete ? `
+        <div class="erp-warn-dialog">
+          <div class="erp-warn-dialog-icon">🗑️</div>
+          <div class="erp-warn-dialog-body">
+            <div class="erp-warn-dialog-title">Delete <code>${esc(selUc)}</code>?</div>
+            <div class="erp-warn-dialog-msg">Removes <code>use-cases/${esc(selUc)}/</code> and local Docker images. Use cases pushed to GitHub are protected.</div>
+          </div>
+          <div class="erp-warn-dialog-actions">
+            <button class="erp-btn erp-btn-ghost" id="dp-del-cancel">Cancel</button>
+            <button class="erp-btn erp-btn-danger" id="dp-del-confirm" ${detail.deleting?'disabled':''}>
+              ${detail.deleting ? '⏳ Deleting…' : '🗑️ Delete permanently'}
+            </button>
+          </div>
+        </div>` : ''}
+
+        ${selSource === 'local' ? renderLocalActions(uc) : renderRemoteActions()}
+
+        ${(detail.building || detail.buildLog.length > 0) ? `
+        <div class="erp-build-output">
+          <div class="erp-build-status ${detail.buildDone ? 'erp-build-ok' : detail.buildFailed ? 'erp-build-fail' : 'erp-build-running'}">
+            ${detail.buildDone ? '✅ Build complete' : detail.buildFailed ? '❌ Build failed' : '⏳ Building…'}
+          </div>
+          <pre class="erp-build-log" id="dp-log">${esc(detail.buildLog.join(''))}</pre>
+        </div>` : ''}
+      </div>`;
+  }
+
+  function renderLocalActions(uc) {
+    const d = state.detail;
+    const isBuilt = uc && uc.builtTags.length > 0;
+    const targetName = d.targets.find(t => t.id === d.target)?.name || d.target;
+    return `
+      <div class="erp-actions-grid">
+        <div class="erp-action-block">
+          <div class="erp-action-block-label">
+            Build
+            <span class="erp-ver-help" id="dp-ver-help-toggle" title="Version format help">ⓘ versioning</span>
+          </div>
+          <div id="dp-ver-legend" class="erp-ver-legend" style="display:none">
+            <strong>v{frappe}.{release}.{patch}</strong><br>
+            <span><code>frappe</code> Frappe major version — changes on Frappe upgrades</span><br>
+            <span><code>release</code> App list or breaking config changed — existing deployments may need rebuild</span><br>
+            <span><code>patch</code> Patch/security rebuild only — safe drop-in</span><br>
+            <em>e.g. v16.1.0 → v16.1.3 → v16.2.0</em>
+          </div>
+          <div class="erp-action-row">
+            <code class="erp-tag-preview">${esc(d.nextBuildTag || '…')}</code>
+            <button class="erp-btn erp-btn-build" id="dp-build" ${(d.building||!d.nextBuildTag)?'disabled':''}>
+              ${d.building ? '⏳ Building…' : isBuilt ? '🔨 Rebuild' : '🔨 Build'}
+            </button>
+          </div>
+        </div>
+
+        ${isBuilt ? `
+        <div class="erp-action-block">
+          <div class="erp-action-block-label">Deploy</div>
+          <div class="erp-action-row">
+            ${uc.builtTags.length > 1
+              ? `<select class="erp-select erp-tag-select" id="dp-tag-select">
+                  ${uc.builtTags.map(t=>`<option value="${esc(t)}" ${t===d.deployTag?'selected':''}>${esc(t)}</option>`).join('')}
+                 </select>`
+              : `<code class="erp-tag-preview">${esc(d.deployTag)}</code>`}
+            <button class="erp-btn erp-btn-primary" id="dp-deploy" ${(d.building||!d.deployTag)?'disabled':''}>
+              🚀 ${esc(targetName)}
+            </button>
+          </div>
+        </div>` : ''}
+
+        <div class="erp-action-block">
+          <div class="erp-action-block-label">Target</div>
+          <div class="erp-target-list">
+            ${d.targets.map(t=>`
+              <label class="erp-target-opt ${t.id===d.target?'erp-target-sel':''}">
+                <input type="radio" name="dp-target" value="${esc(t.id)}" ${t.id===d.target?'checked':''}/>
+                ${esc(t.name)}
+              </label>`).join('')}
+          </div>
+        </div>
+
+        <div class="erp-action-block erp-action-danger">
+          <button class="erp-btn erp-btn-danger" id="dp-delete-uc">🗑️ Delete use case</button>
+        </div>
+      </div>`;
+  }
+
+  function renderRemoteActions() {
+    return `
+      <div class="erp-actions-grid">
+        <div class="erp-action-block">
+          <div class="erp-action-block-label">Deploy</div>
+          <div class="erp-action-row">
+            <code class="erp-tag-preview">${esc(state.sidebar.selTag || '—')}</code>
+            <button class="erp-btn erp-btn-primary" id="dp-deploy">🚀 Deploy</button>
+          </div>
+        </div>
       </div>`;
   }
 
@@ -76,90 +352,74 @@
 
   function renderCreateView() {
     const c = state.create;
-    if (c.phase === 'loading') return '<div class="eg-loading">Loading app catalogue…</div>';
-
-    return `<div class="eg-wrap">
-      <div class="eg-header">
-        <span class="eg-header-icon">${c.editMode ? '✏️' : '📦'}</span>
+    if (c.phase === 'loading') return '<div class="erp-loading">Loading app catalogue…</div>';
+    return `<div class="erp-wrap">
+      <div class="erp-header">
+        <span class="erp-header-icon">${c.editMode ? '✏️' : '📦'}</span>
         <div>
-          <div class="eg-header-title">${c.editMode ? `Edit: ${esc(c.editName)}` : 'Define Use Case'}</div>
-          <div class="eg-header-sub">${c.editMode
-            ? 'Editing a local use case — changes will bump the image version'
-            : 'Name your image, pick apps, save locally — then build and deploy from the Deploy tab'}</div>
+          <div class="erp-header-title">${c.editMode ? `Edit: ${esc(c.editName)}` : 'New Use Case'}</div>
+          <div class="erp-header-sub">${c.editMode ? 'Editing a local use case' : 'Define apps → save locally → build → deploy'}</div>
         </div>
-        ${c.editMode ? `<button class="eg-btn eg-btn-ghost" id="eg-cancel-edit" style="margin-left:auto">✕ Cancel</button>` : ''}
+        ${c.editMode ? `<button class="erp-btn erp-btn-ghost" id="eg-cancel-edit" style="margin-left:auto">✕ Cancel</button>` : ''}
       </div>
 
-      ${c.loadError ? `<div class="eg-error">Failed to load catalogue: ${esc(c.loadError)}</div>` : ''}
+      ${c.loadError ? `<div class="erp-error">${esc(c.loadError)}</div>` : ''}
 
-      <form id="eg-form" class="eg-form" autocomplete="off">
-        <div class="eg-section-label">Use Case</div>
-        <div class="eg-row2">
-          <div class="eg-field">
-            <label class="eg-label" for="eg-name">Name <span class="eg-hint">(kebab-case)</span></label>
-            <input id="eg-name" class="eg-input" type="text" placeholder="my-use-case"
-              pattern="[a-z][a-z0-9-]*" value="${esc(c.name)}"
-              autocomplete="off" spellcheck="false"
+      <form id="eg-form" class="erp-form" autocomplete="off">
+        <div class="erp-section-label">Use Case</div>
+        <div class="erp-row2">
+          <div class="erp-field">
+            <label class="erp-label" for="eg-name">Name <span class="erp-hint">(kebab-case)</span></label>
+            <input id="eg-name" class="erp-input" type="text" placeholder="my-use-case"
+              value="${esc(c.name)}" autocomplete="off" spellcheck="false"
               ${c.editMode ? 'readonly style="opacity:.6;cursor:not-allowed"' : ''}/>
           </div>
-          <div class="eg-field">
-            <label class="eg-label" for="eg-frappe">Frappe Version</label>
-            <select id="eg-frappe" class="eg-select">
-              ${['15','16','17'].map(v =>
-                `<option value="${v}" ${c.frappeMajor === v ? 'selected' : ''}>v${v}</option>`
-              ).join('')}
+          <div class="erp-field">
+            <label class="erp-label" for="eg-frappe">Frappe</label>
+            <select id="eg-frappe" class="erp-select">
+              ${['15','16','17'].map(v=>`<option value="${v}" ${c.frappeMajor===v?'selected':''}>v${v}</option>`).join('')}
             </select>
           </div>
         </div>
-
-        <div class="eg-field">
-          <label class="eg-label" for="eg-desc">Description</label>
-          <textarea id="eg-desc" class="eg-textarea" rows="2"
-            placeholder="What is this image for?">${esc(c.description)}</textarea>
+        <div class="erp-field">
+          <label class="erp-label" for="eg-desc">Description</label>
+          <textarea id="eg-desc" class="erp-textarea" rows="2" placeholder="What is this image for?">${esc(c.description)}</textarea>
         </div>
 
-        <div class="eg-section-label">App Selection
-          <span class="eg-sel-count">${c.selectedApps.size} selected</span>
-        </div>
+        <div class="erp-section-label">App Selection <span class="erp-sel-count">${c.selectedApps.size} selected</span></div>
         ${renderCatalogue()}
 
-        <div class="eg-section-label">Preview</div>
+        <div class="erp-section-label">Preview</div>
         <div id="eg-preview-wrap">${renderPreview()}</div>
 
         ${c.saveResult ? `
-        <div class="eg-saved">
-          <div class="eg-saved-title">✅ Saved → <code>${esc(c.saveResult.path)}</code></div>
-          <div class="eg-saved-tag">
+        <div class="erp-saved">
+          <div class="erp-saved-title">✅ Saved → <code>${esc(c.saveResult.path)}</code></div>
+          ${c.saveResult.nextTag ? `
+          <div class="erp-saved-tag">
             Next tag: <code>${esc(c.saveResult.nextTag)}</code>
-            <span class="eg-bump-badge eg-bump-${esc(c.saveResult.bumpType)}">
-              ${{ initial: '🟢 v{frappe}.1.0 — first build',
-                  patch:   '⚡ v{frappe}.{release}.{patch+1} — patch rebuild, no breaking changes',
-                  release: '⚠️ v{frappe}.{release+1}.0 — new release, breaking changes or config required',
-                }[c.saveResult.bumpType] || c.saveResult.bumpType}
+            <span class="erp-bump-badge erp-bump-${esc(c.saveResult.bumpType)}">
+              ${{initial:'🟢 v{frappe}.1.0 — first build', patch:'⚡ patch rebuild', release:'⚠️ release — check deployments'}[c.saveResult.bumpType]||c.saveResult.bumpType}
             </span>
-          </div>
+          </div>` : ''}
         </div>` : ''}
 
         ${c.showChangeWarning ? `
-        <div class="eg-warn-dialog">
-          <div class="eg-warn-dialog-icon">⚠️</div>
-          <div class="eg-warn-dialog-body">
-            <div class="eg-warn-dialog-title">App list changed — this is a breaking change</div>
-            <div class="eg-warn-dialog-msg">
-              Anything deployed from the previous version of <strong>${esc(c.editName)}</strong> will
-              behave differently after this update. This requires a <strong>major version bump</strong>.
-              Existing deployments should be rebuilt from the new image before going live.
-            </div>
+        <div class="erp-warn-dialog">
+          <div class="erp-warn-dialog-icon">⚠️</div>
+          <div class="erp-warn-dialog-body">
+            <div class="erp-warn-dialog-title">App list changed — breaking change</div>
+            <div class="erp-warn-dialog-msg">Existing deployments of <strong>${esc(c.editName)}</strong> may behave differently. This requires a <strong>release version bump</strong>.</div>
           </div>
-          <div class="eg-warn-dialog-actions">
-            <button class="eg-btn eg-btn-ghost" id="eg-warn-cancel">Cancel</button>
-            <button class="eg-btn eg-btn-danger" id="eg-warn-confirm">Understood — save with major bump</button>
+          <div class="erp-warn-dialog-actions">
+            <button class="erp-btn erp-btn-ghost" id="eg-warn-cancel">Cancel</button>
+            <button class="erp-btn erp-btn-danger" id="eg-warn-confirm">Understood — save with release bump</button>
           </div>
         </div>` : ''}
 
-        <div class="eg-actions">
-          <button type="button" id="eg-save" class="eg-btn eg-btn-save"
-            ${(c.saving || !c.name || c.selectedApps.size === 0) ? 'disabled' : ''}>
+        <div class="erp-actions">
+          <button type="button" id="eg-save" class="erp-btn erp-btn-save"
+            ${(c.saving||!c.name||c.selectedApps.size===0)?'disabled':''}>
             ${c.saving ? '⏳ Saving…' : c.editMode ? '💾 Save changes' : '💾 Save locally'}
           </button>
         </div>
@@ -169,667 +429,516 @@
 
   function renderCatalogue() {
     const c = state.create;
-    if (!c.catalogue.length) return '<div class="eg-notice">No apps loaded.</div>';
+    if (!c.catalogue.length) return '<div class="erp-notice">No apps loaded.</div>';
     return c.catalogue.map(cat => `
-      <div class="eg-cat">
-        <div class="eg-cat-name">${esc(cat.name)}</div>
-        <div class="eg-app-list">
+      <div class="erp-cat">
+        <div class="erp-cat-name">${esc(cat.name)}</div>
+        <div class="erp-app-list">
           ${cat.apps.map(app => {
             const checked = c.selectedApps.has(app.repo);
-            return `<label class="eg-app ${checked ? 'eg-app-checked' : ''}">
+            return `<label class="erp-app ${checked?'erp-app-checked':''}">
               <input type="checkbox" class="eg-app-cb"
                 data-repo="${esc(app.repo)}" data-branch="${esc(app.branch)}" data-name="${esc(app.name)}"
-                ${checked ? 'checked' : ''}/>
-              <span class="eg-app-icon">${app.statusIcon}</span>
-              <span class="eg-app-name">${esc(app.name)}</span>
-              <span class="eg-app-ref">${esc(app.repo)}@${esc(app.branch)}</span>
+                ${checked?'checked':''}/>
+              <span class="erp-app-icon">${app.statusIcon}</span>
+              <span class="erp-app-name">${esc(app.name)}</span>
+              <span class="erp-app-ref">${esc(app.repo)}@${esc(app.branch)}</span>
             </label>`;
           }).join('')}
         </div>
-      </div>`
-    ).join('');
+      </div>`).join('');
   }
 
   function renderPreview() {
     const c = state.create;
-    if (!c.name && c.selectedApps.size === 0) {
-      return '<div class="eg-notice">Fill in a name and select apps to see the preview.</div>';
-    }
-    const appsArr = [...c.selectedApps.values()];
-    const json = JSON.stringify(
-      appsArr.map(a => ({ url: `https://github.com/${a.repo}`, branch: a.branch })), null, 2
-    );
-    const versionLine = c.nextVersion
-      ? `Suggested tag: <strong>${esc(c.nextVersion)}</strong> &nbsp;·&nbsp; Branch: <code>use-case/${esc(c.name) || '&lt;name&gt;'}</code>`
-      : 'Fetching next version…';
-    return `<div class="eg-preview">
-      <div class="eg-preview-meta">${versionLine}</div>
-      <pre class="eg-code">${esc(json)}</pre>
+    if (!c.name && c.selectedApps.size === 0) return '<div class="erp-notice">Fill in a name and select apps to see the preview.</div>';
+    const json = JSON.stringify([...c.selectedApps.values()].map(a=>({url:`https://github.com/${a.repo}`,branch:a.branch})),null,2);
+    return `<div class="erp-preview">
+      <div class="erp-preview-meta">${c.nextVersion ? `Next tag: <strong>${esc(c.nextVersion)}</strong>` : 'Fetching next version…'}</div>
+      <pre class="erp-code">${esc(json)}</pre>
     </div>`;
   }
 
-  // ── DEPLOY VIEW ────────────────────────────────────────────────────────────
+  // ── EVENT BINDING ──────────────────────────────────────────────────────────
 
-  function renderDeployView() {
-    const d = state.deploy;
-    if (d.loading) return '<div class="eg-loading">Loading use cases…</div>';
-    if (d.loadError) return `<div class="eg-error" style="margin:24px">${esc(d.loadError)}</div>`;
-
-    const sel = d.useCases.find(uc => uc.name === d.selected);
-    const isBuilt = sel && sel.builtTags.length > 0;
-
-    return `<div class="eg-wrap">
-      <div class="eg-header">
-        <span class="eg-header-icon">🚀</span>
-        <div>
-          <div class="eg-header-title">Deploy</div>
-          <div class="eg-header-sub">Build a local image and deploy it to a target environment</div>
-        </div>
-      </div>
-
-      ${d.confirmDelete ? `
-      <div class="eg-warn-dialog">
-        <div class="eg-warn-dialog-icon">🗑️</div>
-        <div class="eg-warn-dialog-body">
-          <div class="eg-warn-dialog-title">Delete local use case: <code>${esc(d.confirmDelete)}</code>?</div>
-          <div class="eg-warn-dialog-msg">
-            Removes <code>use-cases/${esc(d.confirmDelete)}/</code> and any local Docker images.
-            Cannot be undone. Use cases pushed to GitHub are protected and will be blocked.
-          </div>
-        </div>
-        <div class="eg-warn-dialog-actions">
-          <button class="eg-btn eg-btn-ghost" id="dp-del-cancel">Cancel</button>
-          <button class="eg-btn eg-btn-danger" id="dp-del-confirm" ${d.deleting ? 'disabled' : ''}>
-            ${d.deleting ? '⏳ Deleting…' : '🗑️ Delete permanently'}
-          </button>
-        </div>
-      </div>` : ''}
-
-      <div class="eg-section-label">Use Case</div>
-      ${d.useCases.length === 0
-        ? `<div class="eg-notice">No local use cases found. <button class="eg-link" id="dp-go-create">Create one →</button></div>`
-        : `<div class="eg-uc-list">
-          ${d.useCases.map(uc => {
-            const built = uc.builtTags.length > 0;
-            return `<div class="eg-uc-row">
-              <label class="eg-uc ${uc.name === d.selected ? 'eg-uc-selected' : ''}">
-                <input type="radio" name="eg-uc" value="${esc(uc.name)}" ${uc.name === d.selected ? 'checked' : ''}/>
-                <div class="eg-uc-info">
-                  <span class="eg-uc-name">${esc(uc.name)}</span>
-                  <span class="eg-uc-apps">${uc.apps.length} app${uc.apps.length !== 1 ? 's' : ''}</span>
-                </div>
-                <div class="eg-uc-build ${built ? 'eg-uc-built' : 'eg-uc-notbuilt'}">
-                  ${built ? `✅ ${uc.builtTags[0]}` : '○ Not built'}
-                </div>
-              </label>
-              ${uc.source === 'local' ? `
-                <button class="eg-btn-edit" data-edit="${esc(uc.name)}" title="Edit this use case">✏️</button>
-                <button class="eg-btn-del" data-del="${esc(uc.name)}" title="Delete local use case and images">🗑️</button>
-              ` : ''}
-            </div>`;
-          }).join('')}
-        </div>`
-      }
-
-      <div class="eg-section-label" style="margin-top:16px">Target</div>
-      <div class="eg-target-list">
-        ${d.targets.map(t => `
-          <label class="eg-target ${t.id === d.target ? 'eg-target-selected' : ''}">
-            <input type="radio" name="eg-target" value="${esc(t.id)}" ${t.id === d.target ? 'checked' : ''}/>
-            <div class="eg-target-info">
-              <span class="eg-target-name">${esc(t.name)}</span>
-              <span class="eg-target-desc">${esc(t.description)}</span>
-            </div>
-          </label>`
-        ).join('')}
-      </div>
-
-      ${sel ? `
-        <div class="eg-section-label" style="margin-top:16px">
-        Actions
-        <span class="eg-ver-help" id="dp-ver-help-toggle" title="Version format help">ⓘ versioning</span>
-      </div>
-      <div class="eg-ver-legend" id="dp-ver-legend" style="display:none">
-        <strong>Tag format: v{frappe}.{release}.{patch}</strong><br>
-        <span class="eg-ver-row"><code>frappe</code> Frappe major version — changes when you upgrade Frappe (16 → 17)</span>
-        <span class="eg-ver-row"><code>release</code> Increments when the app list changes or breaking config is required. Existing deployments may need rebuild or reconfiguration.</span>
-        <span class="eg-ver-row"><code>patch</code> Increments on rebuild with dependency or security updates only — safe drop-in replacement, no breaking changes.</span>
-        <span class="eg-ver-example">e.g. <code>v16.1.0</code> → <code>v16.1.3</code> (3 patch rebuilds) → <code>v16.2.0</code> (app list changed)</span>
-      </div>
-        <div class="eg-deploy-actions">
-          <div class="eg-action-group">
-            <div class="eg-action-label">Build</div>
-            <div class="eg-action-row">
-              <code class="eg-tag-preview">${esc(d.nextBuildTag || '…')}</code>
-              <button class="eg-btn eg-btn-build" id="dp-build"
-                ${(d.building || !d.nextBuildTag) ? 'disabled' : ''}>
-                ${d.building ? '⏳ Building…' : isBuilt ? '🔨 Rebuild' : '🔨 Build'}
-              </button>
-            </div>
-          </div>
-
-          ${isBuilt ? `
-          <div class="eg-action-group">
-            <div class="eg-action-label">Deploy</div>
-            <div class="eg-action-row">
-              ${sel.builtTags.length > 1
-                ? `<select class="eg-select eg-tag-select" id="dp-tag-select">
-                    ${sel.builtTags.map(t =>
-                      `<option value="${esc(t)}" ${t === d.deployTag ? 'selected' : ''}>${esc(t)}</option>`
-                    ).join('')}
-                   </select>`
-                : `<code class="eg-tag-preview">${esc(d.deployTag)}</code>`
-              }
-              <button class="eg-btn eg-btn-primary" id="dp-deploy"
-                ${(d.building || !d.deployTag) ? 'disabled' : ''}>
-                🚀 Deploy to ${esc(d.targets.find(t => t.id === d.target)?.name || d.target)}
-              </button>
-            </div>
-          </div>` : ''}
-        </div>
-
-        ${(d.building || d.buildLog.length > 0) ? `
-        <div class="eg-build-output">
-          <div class="eg-build-status ${d.buildDone ? 'eg-build-ok' : d.buildFailed ? 'eg-build-fail' : 'eg-build-running'}">
-            ${d.buildDone ? '✅ Build complete' : d.buildFailed ? '❌ Build failed' : '⏳ Building…'}
-          </div>
-          <pre class="eg-build-log" id="dp-log">${esc(d.buildLog.join(''))}</pre>
-        </div>` : ''}
-      ` : '<div class="eg-notice" style="margin-top:12px">Select a use case to continue.</div>'}
-
-    </div>`;
+  function bindAll() {
+    bindSidebar();
+    if (state.view === 'create') bindCreate();
+    if (state.view === 'detail') bindDetail();
+    if (state.view === 'help')   bindHelp();
   }
 
-  // ── CREATE events ──────────────────────────────────────────────────────────
-
-  function updateButtonStates() {
-    const c = state.create;
-    const canAct = !!(c.name && c.selectedApps.size > 0);
-    const saveBtn = document.getElementById('eg-save');
-    if (saveBtn) saveBtn.disabled = !canAct || c.saving;
-  }
-
-  function partialRenderPreview() {
-    const wrap = document.getElementById('eg-preview-wrap');
-    if (wrap) wrap.innerHTML = renderPreview();
-  }
-
-  let versionDebounce = null;
-  function scheduleVersionFetch() {
-    clearTimeout(versionDebounce);
-    versionDebounce = setTimeout(fetchNextVersion, 400);
-  }
-
-  function bindCreateEvents() {
-    const c = state.create;
-    document.querySelectorAll('.eg-tab').forEach(btn => {
-      btn.addEventListener('click', () => { state.view = btn.dataset.view; renderApp(); loadDeployIfNeeded(); });
+  function bindSidebar() {
+    document.querySelector('[data-toggle="local"]')?.addEventListener('click', () => {
+      state.sidebar.localOpen = !state.sidebar.localOpen; renderApp();
     });
-
-    document.getElementById('eg-name')?.addEventListener('input', e => {
-      c.name = e.target.value.trim();
-      partialRenderPreview();
-      updateButtonStates();
-    });
-
-    document.getElementById('eg-desc')?.addEventListener('input', e => { c.description = e.target.value; });
-
-    document.getElementById('eg-frappe')?.addEventListener('change', e => {
-      c.frappeMajor = e.target.value;
-      c.nextVersion = null;
-      scheduleVersionFetch();
-      partialRenderPreview();
-    });
-
-    document.querySelectorAll('.eg-app-cb').forEach(cb => {
-      cb.addEventListener('change', e => {
-        const { repo, branch, name } = e.target.dataset;
-        e.target.checked ? c.selectedApps.set(repo, { repo, branch, name })
-                         : c.selectedApps.delete(repo);
-        const label = e.target.closest('.eg-app');
-        if (label) label.classList.toggle('eg-app-checked', e.target.checked);
-        const countEl = document.querySelector('.eg-sel-count');
-        if (countEl) countEl.textContent = `${c.selectedApps.size} selected`;
-        partialRenderPreview();
-        updateButtonStates();
-      });
-    });
-
-    document.getElementById('eg-cancel-edit')?.addEventListener('click', () => {
-      c.editMode = false; c.editName = null;
-      c.originalAppSet = new Set(); c.showChangeWarning = false;
-      state.view = 'deploy';
+    document.querySelector('[data-toggle="remote"]')?.addEventListener('click', () => {
+      state.sidebar.remoteOpen = !state.sidebar.remoteOpen;
+      if (state.sidebar.remoteOpen && !state.remote.loaded) loadRemote();
       renderApp();
     });
 
-    document.getElementById('eg-warn-cancel')?.addEventListener('click', () => {
-      c.showChangeWarning = false; renderApp();
+    document.getElementById('erp-new')?.addEventListener('click', () => {
+      const c = state.create;
+      c.editMode = false; c.editName = null; c.name = ''; c.description = '';
+      c.selectedApps.clear(); c.saveResult = null; c.showChangeWarning = false;
+      state.view = 'create'; renderApp(); fetchNextVersion();
     });
 
-    document.getElementById('eg-warn-confirm')?.addEventListener('click', () => {
-      c.showChangeWarning = false;
-      doSave(true); // confirmed major bump
-    });
-
-    document.getElementById('eg-save')?.addEventListener('click', () => {
-      if (!c.name || c.selectedApps.size === 0) return;
-      if (c.editMode) {
-        // Check if app set changed
-        const currentSet = new Set(c.selectedApps.keys());
-        const changed = currentSet.size !== c.originalAppSet.size ||
-          [...currentSet].some(r => !c.originalAppSet.has(r));
-        if (changed) { c.showChangeWarning = true; renderApp(); return; }
-      }
-      doSave(false);
-    });
-
-    async function doSave(majorBump) {
-      c.saving = true; c.saveResult = null; renderApp();
-      try {
-        const res = await fetch(`${API}/api/save-local`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: c.name, description: c.description,
-            frappeMajor: c.frappeMajor,
-            apps: [...c.selectedApps.values()],
-            majorBump,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || res.statusText);
-        c.saveResult = data;
-        c.saving = false;
-        if (c.editMode) {
-          c.originalAppSet = new Set(c.selectedApps.keys());
-          deployLoaded = false;
-        }
-        state.deploy.selected = c.name;
-        state.view = 'deploy';
-        loadDeployIfNeeded();
+    // Use case header click → expand/collapse (or open detail if no tags)
+    document.querySelectorAll('.erp-s-uc-hdr').forEach(hdr => {
+      hdr.addEventListener('click', e => {
+        if (e.target.closest('.erp-s-icon')) return;
+        const name   = hdr.dataset.uc;
+        const source = hdr.dataset.source;
+        const expSet = source === 'local' ? state.sidebar.localExpanded : state.sidebar.remoteExpanded;
+        if (expSet.has(name)) expSet.delete(name); else expSet.add(name);
+        // If local and no tags, select it and show detail
+        const uc = state.local.useCases.find(u => u.name === name);
+        if (source === 'local' && uc && uc.builtTags.length === 0) selectUc(name, null, 'local');
         renderApp();
-        state.deploy.selected = c.name;
-        state.view = 'deploy';
-        loadDeployIfNeeded();
-        renderApp();
-      } catch (err) {
-        c.saving = false;
-        c.loadError = `Save failed: ${err.message}`;
-        renderApp();
-      }
-    }
-  }
-
-  // ── DEPLOY events ──────────────────────────────────────────────────────────
-
-  function bindDeployEvents() {
-    document.querySelectorAll('.eg-tab').forEach(btn => {
-      btn.addEventListener('click', () => { state.view = btn.dataset.view; renderApp(); loadDeployIfNeeded(); });
-    });
-
-    document.getElementById('dp-go-create')?.addEventListener('click', () => {
-      state.view = 'create'; renderApp();
-    });
-
-    document.querySelectorAll('input[name="eg-uc"]').forEach(r => {
-      r.addEventListener('change', e => {
-        const d = state.deploy;
-        d.selected = e.target.value;
-        d.buildLog = [];
-        d.buildDone = false;
-        d.buildFailed = false;
-        d.building = false;
-        d.nextBuildTag = '';
-        const uc = d.useCases.find(u => u.name === d.selected);
-        // Default deploy tag = most recent built tag
-        d.deployTag = (uc?.builtTags ?? [])[0] ?? '';
-        renderApp();
-        loadNextBuildTag(d.selected);
       });
     });
 
-    document.querySelectorAll('input[name="eg-target"]').forEach(r => {
-      r.addEventListener('change', e => { state.deploy.target = e.target.value; renderApp(); });
+    // Tag click → select + show detail
+    document.querySelectorAll('.erp-s-tag').forEach(tag => {
+      tag.addEventListener('click', () => selectUc(tag.dataset.uc, tag.dataset.tag, tag.dataset.source));
     });
 
-    document.getElementById('dp-tag-select')?.addEventListener('change', e => {
-      state.deploy.deployTag = e.target.value;
+    // No-tags row click in expanded uc
+    document.querySelectorAll('.erp-s-no-tags').forEach(el => {
+      el.addEventListener('click', () => {
+        const uc = el.closest('.erp-s-uc').querySelector('.erp-s-uc-hdr');
+        if (uc) selectUc(uc.dataset.uc, null, 'local');
+      });
     });
 
-    document.getElementById('dp-build')?.addEventListener('click', () => {
-      const d = state.deploy;
-      if (!d.selected || d.building || !d.nextBuildTag) return;
-      startBuild(d.selected, d.nextBuildTag);
+    // Edit button
+    document.querySelectorAll('.erp-s-icon[data-edit]').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); loadUseCase(btn.dataset.edit); });
     });
 
-    document.getElementById('dp-ver-help-toggle')?.addEventListener('click', () => {
-      const leg = document.getElementById('dp-ver-legend');
-      if (leg) leg.style.display = leg.style.display === 'none' ? 'block' : 'none';
-    });
-
-    document.querySelectorAll('.eg-btn-del').forEach(btn => {
+    // Delete button
+    document.querySelectorAll('.erp-s-icon[data-del]').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        state.deploy.confirmDelete = btn.dataset.del;
+        selectUc(btn.dataset.del, null, 'local');
+        state.detail.confirmDelete = btn.dataset.del;
         renderApp();
       });
     });
+  }
 
-    document.getElementById('dp-del-cancel')?.addEventListener('click', () => {
-      state.deploy.confirmDelete = null; renderApp();
+  function selectUc(name, tag, source) {
+    const sb = state.sidebar;
+    sb.selUc = name; sb.selTag = tag; sb.selSource = source;
+    state.view = 'detail';
+    const d = state.detail;
+    d.buildLog = []; d.buildDone = false; d.buildFailed = false;
+    d.building = false; d.confirmDelete = null; d.nextBuildTag = ''; d.deployTag = '';
+    const uc = state.local.useCases.find(u => u.name === name);
+    d.deployTag = tag || (uc?.builtTags ?? [])[0] || '';
+    if (!d.targets.length) loadTargets();
+    if (source === 'local') loadNextBuildTag(name);
+    renderApp();
+  }
+
+  function bindHelp() {
+    document.getElementById('help-edit')?.addEventListener('click', () => {
+      state.help.editing = true;
+      state.help.editContent = state.help.content ?? DEFAULT_HELP;
+      renderApp();
     });
+    document.getElementById('help-cancel')?.addEventListener('click', () => {
+      state.help.editing = false; renderApp();
+    });
+    document.getElementById('help-save')?.addEventListener('click', async () => {
+      const content = document.getElementById('help-editor')?.value ?? '';
+      state.help.saving = true; renderApp();
+      try {
+        await fetch(`${API}/api/help`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({content}) });
+        state.help.content = content;
+      } catch { /* non-fatal */ }
+      state.help.saving = false; state.help.editing = false; renderApp();
+    });
+    document.getElementById('help-reset')?.addEventListener('click', async () => {
+      await fetch(`${API}/api/help`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({content:''}) });
+      state.help.content = null; state.help.editing = false; renderApp();
+    });
+  }
 
+  function bindDetail() {
+    const d = state.detail;
+    document.getElementById('dp-ver-help-toggle')?.addEventListener('click', () => {
+      const el = document.getElementById('dp-ver-legend');
+      if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    });
+    document.getElementById('dp-build')?.addEventListener('click', () => {
+      if (!state.sidebar.selUc || d.building || !d.nextBuildTag) return;
+      startBuild(state.sidebar.selUc, d.nextBuildTag);
+    });
+    document.getElementById('dp-tag-select')?.addEventListener('change', e => { d.deployTag = e.target.value; });
+    document.querySelectorAll('input[name="dp-target"]').forEach(r => {
+      r.addEventListener('change', e => { d.target = e.target.value; });
+    });
+    document.getElementById('dp-deploy')?.addEventListener('click', () => {
+      window.__docwright?.notify({ type:'info', title:'Deploy', message:'Ansible deployment coming in the next phase.' });
+    });
+    document.getElementById('dp-delete-uc')?.addEventListener('click', () => {
+      d.confirmDelete = state.sidebar.selUc; renderApp();
+    });
+    document.getElementById('dp-del-cancel')?.addEventListener('click', () => { d.confirmDelete = null; renderApp(); });
     document.getElementById('dp-del-confirm')?.addEventListener('click', async () => {
-      const d = state.deploy;
       const name = d.confirmDelete;
       d.deleting = true; renderApp();
       try {
-        const res = await fetch(`${API}/api/delete-local`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
+        const res  = await fetch(`${API}/api/delete-local`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
-        d.confirmDelete = null;
-        d.deleting = false;
-        if (d.selected === name) d.selected = null;
+        d.confirmDelete = null; d.deleting = false;
+        state.sidebar.selUc = null; state.sidebar.selTag = null;
+        state.view = 'help';
         deployLoaded = false;
-        loadDeployIfNeeded();
-        window.__docwright?.toast(`Deleted "${name}"${data.removedImages?.length ? ` and ${data.removedImages.length} image(s)` : ''}`, 4000);
+        loadLocal();
+        window.__docwright?.toast(`Deleted "${name}"${data.removedImages?.length?` + ${data.removedImages.length} image(s)`:''}`, 4000);
       } catch (err) {
         d.deleting = false;
-        window.__docwright?.notify({ type: 'error', title: 'Delete failed', message: err.message });
+        window.__docwright?.notify({ type:'error', title:'Delete failed', message: err.message });
         renderApp();
       }
     });
+  }
 
-    document.querySelectorAll('.eg-btn-edit').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const name = btn.dataset.edit;
-        await loadUseCase(name);
+  function bindCreate() {
+    const c = state.create;
+    document.getElementById('eg-cancel-edit')?.addEventListener('click', () => {
+      c.editMode = false; c.editName = null; c.showChangeWarning = false;
+      state.view = state.sidebar.selUc ? 'detail' : 'help'; renderApp();
+    });
+    document.getElementById('eg-warn-cancel')?.addEventListener('click', () => { c.showChangeWarning = false; renderApp(); });
+    document.getElementById('eg-warn-confirm')?.addEventListener('click', () => { c.showChangeWarning = false; doSave(true); });
+
+    document.getElementById('eg-name')?.addEventListener('input', e => {
+      c.name = e.target.value.trim(); partialRenderPreview(); updateSaveBtn();
+    });
+    document.getElementById('eg-desc')?.addEventListener('input', e => { c.description = e.target.value; });
+    document.getElementById('eg-frappe')?.addEventListener('change', e => {
+      c.frappeMajor = e.target.value; c.nextVersion = null; scheduleVersionFetch(); partialRenderPreview();
+    });
+    document.querySelectorAll('.eg-app-cb').forEach(cb => {
+      cb.addEventListener('change', e => {
+        const { repo, branch, name } = e.target.dataset;
+        e.target.checked ? c.selectedApps.set(repo,{repo,branch,name}) : c.selectedApps.delete(repo);
+        const label = e.target.closest('.erp-app');
+        if (label) label.classList.toggle('erp-app-checked', e.target.checked);
+        const countEl = document.querySelector('.erp-sel-count');
+        if (countEl) countEl.textContent = `${c.selectedApps.size} selected`;
+        partialRenderPreview(); updateSaveBtn();
       });
     });
-
-    document.getElementById('dp-deploy')?.addEventListener('click', () => {
-      window.__docwright?.notify({
-        type: 'info',
-        title: 'Deploy',
-        message: 'Ansible deployment coming in the next phase.',
-      });
+    document.getElementById('eg-save')?.addEventListener('click', () => {
+      if (!c.name || c.selectedApps.size === 0) return;
+      if (c.editMode) {
+        const cur  = new Set(c.selectedApps.keys());
+        const diff = cur.size !== c.originalAppSet.size || [...cur].some(r => !c.originalAppSet.has(r));
+        if (diff) { c.showChangeWarning = true; renderApp(); return; }
+      }
+      doSave(false);
     });
   }
 
-  // ── Build streaming ────────────────────────────────────────────────────────
+  // ── CREATE helpers ─────────────────────────────────────────────────────────
+
+  function updateSaveBtn() {
+    const c = state.create;
+    const btn = document.getElementById('eg-save');
+    if (btn) btn.disabled = !c.name || c.selectedApps.size === 0 || c.saving;
+  }
+  function partialRenderPreview() {
+    const w = document.getElementById('eg-preview-wrap');
+    if (w) w.innerHTML = renderPreview();
+  }
+
+  let versionDebounce = null;
+  function scheduleVersionFetch() { clearTimeout(versionDebounce); versionDebounce = setTimeout(fetchNextVersion,400); }
+
+  async function doSave(majorBump) {
+    const c = state.create;
+    c.saving = true; c.saveResult = null; renderApp();
+    try {
+      const res  = await fetch(`${API}/api/save-local`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name:c.name, description:c.description, frappeMajor:c.frappeMajor, apps:[...c.selectedApps.values()], majorBump }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      c.saveResult = data; c.saving = false;
+      if (c.editMode) c.originalAppSet = new Set(c.selectedApps.keys());
+      // Switch to detail for the saved use case
+      loadLocal().then(() => selectUc(c.name, null, 'local'));
+    } catch (err) {
+      c.saving = false; c.loadError = `Save failed: ${err.message}`; renderApp();
+    }
+  }
+
+  async function loadUseCase(name) {
+    const res  = await fetch(`${API}/api/use-case?name=${encodeURIComponent(name)}`);
+    if (!res.ok) { window.__docwright?.toast(`Could not load ${name}`,3000); return; }
+    const data = await res.json();
+    const c    = state.create;
+    c.name = data.name; c.description = data.description || ''; c.selectedApps.clear();
+    for (const app of data.apps) {
+      const repo = (app.url||'').replace('https://github.com/','');
+      if (!repo) continue;
+      let displayName = repo.split('/')[1] || repo;
+      for (const cat of c.catalogue) { const f = cat.apps.find(a => a.repo===repo); if (f) { displayName = f.name; break; } }
+      c.selectedApps.set(repo, { repo, branch: app.branch, name: displayName });
+    }
+    c.originalAppSet = new Set(c.selectedApps.keys());
+    c.editMode = true; c.editName = name; c.saveResult = null; c.showChangeWarning = false;
+    state.view = 'create'; renderApp(); fetchNextVersion();
+  }
+
+  // ── BUILD streaming ────────────────────────────────────────────────────────
 
   function startBuild(name, tag) {
-    const d = state.deploy;
-    d.building = true;
-    d.buildLog = [];
-    d.buildDone = false;
-    d.buildFailed = false;
+    const d = state.detail;
+    d.building = true; d.buildLog = []; d.buildDone = false; d.buildFailed = false;
     renderApp();
-
-    const url = `${API}/api/build?name=${encodeURIComponent(name)}&tag=${encodeURIComponent(tag)}`;
-    const es = new EventSource(url);
-
-    es.onmessage = (e) => {
+    const es = new EventSource(`${API}/api/build?name=${encodeURIComponent(name)}&tag=${encodeURIComponent(tag)}`);
+    es.onmessage = e => {
       const { line } = JSON.parse(e.data);
       d.buildLog.push(line);
       const logEl = document.getElementById('dp-log');
       if (logEl) { logEl.textContent += line; logEl.scrollTop = logEl.scrollHeight; }
     };
-
-    es.addEventListener('done', (e) => {
+    es.addEventListener('done', e => {
       const { code } = JSON.parse(e.data);
-      const justBuilt = d.nextBuildTag; // capture before recalc
-      d.building = false;
-      d.buildDone = code === 0;
-      d.buildFailed = code !== 0;
+      const justBuilt = tag;
+      d.building = false; d.buildDone = code===0; d.buildFailed = code!==0;
       es.close();
-      fetch(`${API}/api/use-cases`).then(r => r.json()).then(ucs => {
-        d.useCases = ucs;
-        if (code === 0) {
-          d.deployTag = justBuilt;      // the tag we just built is now deployable
-          loadNextBuildTag(d.selected); // recalculate what comes next
-        }
+      loadLocal().then(() => {
+        if (code===0) { d.deployTag = justBuilt; loadNextBuildTag(name); }
         renderApp();
       }).catch(() => renderApp());
     });
-
-    es.addEventListener('error', () => {
-      d.building = false;
-      d.buildFailed = true;
-      es.close();
-      renderApp();
-    });
+    es.addEventListener('error', () => { d.building=false; d.buildFailed=true; es.close(); renderApp(); });
   }
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
   let deployLoaded = false;
-  function loadDeployIfNeeded() {
-    if (state.view !== 'deploy' || deployLoaded) return;
-    deployLoaded = false; // allow refresh
-    const d = state.deploy;
-    d.loading = true;
-    d.loadError = null;
-    Promise.all([
-      fetch(`${API}/api/use-cases`).then(r => r.json()),
-      fetch(`${API}/api/targets`).then(r => r.json()),
-    ]).then(([ucs, targets]) => {
-      d.useCases = ucs;
-      d.targets = targets;
-      d.loading = false;
-      deployLoaded = true;
-      if (!d.selected && ucs.length > 0) d.selected = ucs[0].name;
-      const selUc = d.useCases.find(u => u.name === d.selected);
-      d.deployTag = (selUc?.builtTags ?? [])[0] ?? '';
-      renderApp();
-      if (d.selected) loadNextBuildTag(d.selected);
-    }).catch(err => {
-      d.loading = false;
-      d.loadError = err.message;
-      renderApp();
-    });
+
+  async function loadLocal() {
+    state.local.loading = true;
+    try {
+      const ucs = await fetch(`${API}/api/use-cases`).then(r => r.json());
+      state.local.useCases = ucs;
+      // Re-expand any use case that had tags and now has more
+      for (const uc of ucs) if (uc.builtTags.length > 0) state.sidebar.localExpanded.add(uc.name);
+    } catch (e) { state.local.error = e.message; }
+    state.local.loading = false;
+    deployLoaded = true;
+    renderApp();
+    return state.local.useCases;
   }
 
-  async function loadUseCase(name) {
-    const res = await fetch(`${API}/api/use-case?name=${encodeURIComponent(name)}`);
-    if (!res.ok) { window.__docwright?.toast(`Could not load ${name}`, 3000); return; }
-    const data = await res.json();
-    const c = state.create;
-
-    // Populate create state
-    c.name = data.name;
-    c.description = data.description || '';
-    c.selectedApps.clear();
-
-    // Map apps.json entries back to catalogue-style {repo, branch, name}
-    for (const app of data.apps) {
-      const repo = (app.url || '').replace('https://github.com/', '');
-      if (repo) {
-        // Try to find display name from catalogue
-        let displayName = repo.split('/')[1] || repo;
-        for (const cat of c.catalogue) {
-          const found = cat.apps.find(a => a.repo === repo);
-          if (found) { displayName = found.name; break; }
-        }
-        c.selectedApps.set(repo, { repo, branch: app.branch, name: displayName });
-      }
-    }
-
-    // Snapshot original app set for change detection
-    c.originalAppSet = new Set(c.selectedApps.keys());
-    c.editMode = true;
-    c.editName = name;
-    c.saveResult = null;
-    c.showChangeWarning = false;
-
-    state.view = 'create';
+  async function loadRemote() {
+    state.remote.loading = true; renderApp();
+    try {
+      const data = await fetch(`${API}/api/remote-images`).then(r => r.json());
+      state.remote.available = data.available;
+      state.remote.packages  = data.packages || [];
+      state.remote.error     = data.error || null;
+    } catch (e) { state.remote.error = e.message; }
+    state.remote.loading = false; state.remote.loaded = true;
     renderApp();
-    fetchNextVersion();
+  }
+
+  async function loadTargets() {
+    try {
+      state.detail.targets = await fetch(`${API}/api/targets`).then(r => r.json());
+    } catch { /* use empty */ }
   }
 
   async function loadNextBuildTag(name) {
-    const major = '16'; // TODO: derive from apps when we store frappeMajor on the use case
     try {
-      const res = await fetch(`${API}/api/next-tag?name=${encodeURIComponent(name)}&major=${major}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (state.deploy.selected === name) {
-          state.deploy.nextBuildTag = data.tag;
-          // Re-render just the actions section without losing build log
-          const actEl = document.querySelector('.eg-deploy-actions');
-          if (actEl) actEl.outerHTML; // trigger by full re-render
-          renderApp();
-        }
-      }
+      const data = await fetch(`${API}/api/next-tag?name=${encodeURIComponent(name)}&major=16`).then(r=>r.json());
+      if (state.sidebar.selUc === name) { state.detail.nextBuildTag = data.tag; renderApp(); }
     } catch { /* non-fatal */ }
   }
 
   async function fetchNextVersion() {
     const c = state.create;
     try {
-      const res = await fetch(`${API}/api/next-version?major=${encodeURIComponent(c.frappeMajor)}`);
-      if (res.ok) { const v = await res.json(); c.nextVersion = v.tag; partialRenderPreview(); }
+      const v = await fetch(`${API}/api/next-version?major=${encodeURIComponent(c.frappeMajor)}`).then(r=>r.json());
+      c.nextVersion = v.tag; partialRenderPreview();
     } catch { /* non-fatal */ }
   }
 
   async function initCreate() {
     const c = state.create;
     try {
-      const [statusRes, catRes] = await Promise.all([
-        fetch(`${API}/api/status`),
-        fetch(`${API}/api/catalogue`),
-      ]);
-      if (statusRes.ok) { const s = await statusRes.json(); c.tokenSet = !!s.github_token_set; }
-      if (!catRes.ok) throw new Error(`Catalogue fetch failed: ${catRes.status}`);
-      c.catalogue = await catRes.json();
+      const [, cat] = await Promise.all([fetch(`${API}/api/status`).then(r=>r.json()), fetch(`${API}/api/catalogue`).then(r=>r.json())]);
+      c.catalogue = cat;
     } catch (e) { c.loadError = e.message; }
     c.phase = 'form';
-    renderApp();
-    fetchNextVersion();
   }
 
   // ── Styles ─────────────────────────────────────────────────────────────────
 
   const style = document.createElement('style');
   style.textContent = `
-    .eg-tabs { display:flex; border-bottom:2px solid var(--border,#1e2030); padding:0 20px; gap:0; flex-shrink:0; }
-    .eg-tab { background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px;
-      padding:10px 18px; font-size:13px; font-weight:600; color:var(--muted,#666); cursor:pointer; }
-    .eg-tab:hover { color:var(--fg,#ccc); }
-    .eg-tab-active { color:var(--fg,#e0e0f0); border-bottom-color:#58a6ff; }
-    .eg-wrap { max-width:780px; margin:0 auto; padding:20px 24px 40px; font-family:system-ui,-apple-system,sans-serif; }
-    .eg-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
-    .eg-header-icon { font-size:28px; }
-    .eg-header-title { font-size:17px; font-weight:700; color:var(--fg,#e0e0f0); }
-    .eg-header-sub { font-size:12px; color:var(--muted,#666); margin-top:2px; }
-    .eg-error { background:rgba(218,54,51,.1); border-left:3px solid #da3633; padding:10px 14px; border-radius:4px; font-size:12px; color:#da3633; margin-bottom:16px; }
-    .eg-notice { font-size:12px; color:var(--muted,#666); padding:10px 0; }
-    .eg-link { background:none; border:none; color:#58a6ff; cursor:pointer; font-size:12px; text-decoration:underline; }
-    .eg-form { display:flex; flex-direction:column; gap:14px; }
-    .eg-row2 { display:grid; grid-template-columns:1fr auto; gap:12px; }
-    .eg-field { display:flex; flex-direction:column; gap:4px; }
-    .eg-section-label { font-size:11px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:8px; margin-top:4px; }
-    .eg-sel-count { font-weight:400; text-transform:none; letter-spacing:0; color:var(--fg,#aaa); }
-    .eg-label { font-size:12px; color:var(--fg,#ccc); }
-    .eg-hint { font-weight:400; color:var(--muted,#666); }
-    .eg-input,.eg-select,.eg-textarea { background:var(--bg-2,#111128); border:1px solid var(--border,#2a2a4a); border-radius:6px; color:var(--fg,#e0e0f0); font-size:13px; padding:7px 10px; font-family:inherit; }
-    .eg-input:focus,.eg-select:focus,.eg-textarea:focus { outline:none; border-color:#4a6aba; }
-    .eg-textarea { resize:vertical; }
-    .eg-cat { margin-bottom:4px; }
-    .eg-cat-name { font-size:11px; font-weight:600; color:var(--muted,#555); margin:8px 0 4px; text-transform:uppercase; letter-spacing:.4px; }
-    .eg-app-list { display:flex; flex-direction:column; gap:2px; }
-    .eg-app { display:flex; align-items:center; gap:8px; padding:5px 10px; border-radius:5px; cursor:pointer; border:1px solid transparent; }
-    .eg-app:hover { background:var(--bg-2,#1a1a2a); }
-    .eg-app-checked { background:rgba(88,166,255,.07); border-color:rgba(88,166,255,.2); }
-    .eg-app input[type=checkbox] { accent-color:#58a6ff; width:14px; height:14px; flex-shrink:0; }
-    .eg-app-icon { font-size:13px; flex-shrink:0; }
-    .eg-app-name { font-size:13px; color:var(--fg,#e0e0f0); flex-shrink:0; }
-    .eg-app-ref { font-size:11px; color:var(--muted,#666); font-family:monospace; margin-left:auto; }
-    .eg-preview { background:var(--bg-2,#0d0d1e); border:1px solid var(--border,#2a2a4a); border-radius:6px; overflow:hidden; }
-    .eg-preview-meta { font-size:12px; color:var(--muted,#888); padding:8px 12px; border-bottom:1px solid var(--border,#2a2a4a); }
-    .eg-code { margin:0; padding:12px; font-size:12px; font-family:monospace; overflow-x:auto; color:var(--fg,#cce0ff); white-space:pre; }
-    .eg-saved { background:rgba(63,185,80,.07); border:1px solid rgba(63,185,80,.25); border-radius:6px; padding:12px 16px; display:flex; flex-direction:column; gap:6px; }
-    .eg-saved-title { font-size:13px; font-weight:600; color:var(--fg,#e0e0f0); }
-    .eg-saved-tag { font-size:12px; color:var(--muted,#888); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .eg-bump-badge { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:500; }
-    .eg-bump-initial { background:rgba(63,185,80,.15); color:#4caf50; border:1px solid rgba(63,185,80,.3); }
-    .eg-bump-patch   { background:rgba(88,166,255,.12); color:#58a6ff; border:1px solid rgba(88,166,255,.3); }
-    .eg-ver-help { font-size:10px; font-weight:400; text-transform:none; letter-spacing:0; color:#58a6ff; cursor:pointer; margin-left:6px; }
-    .eg-ver-help:hover { text-decoration:underline; }
-    .eg-ver-legend { background:var(--bg-2,#0d0d1e); border:1px solid var(--border,#2a2a4a); border-radius:6px; padding:12px 14px; margin:6px 0 10px; font-size:12px; color:var(--muted,#888); display:flex; flex-direction:column; gap:5px; }
-    .eg-ver-legend strong { color:var(--fg,#ccc); font-size:12px; }
-    .eg-ver-row { display:block; padding-left:4px; }
-    .eg-ver-row code { color:#58a6ff; background:rgba(88,166,255,.1); padding:1px 5px; border-radius:3px; font-size:11px; }
-    .eg-ver-example { margin-top:4px; font-style:italic; }
-    .eg-ver-example code { color:#4caf50; background:rgba(63,185,80,.1); padding:1px 5px; border-radius:3px; font-size:11px; }
-    .eg-bump-release { background:rgba(210,153,34,.12); color:#d4a017; border:1px solid rgba(210,153,34,.3); }
-    .eg-actions { display:flex; align-items:center; gap:12px; padding-top:4px; }
-    .eg-btn { padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid; }
-    .eg-btn-save { background:none; border-color:#3a5a3a; color:#4caf50; }
-    .eg-btn-save:hover:not(:disabled) { background:rgba(63,185,80,.1); }
-    .eg-btn-save:disabled { opacity:.4; cursor:default; }
-    .eg-btn-primary { background:#1e3a6e; border-color:#2a5aba; color:#7ab0ff; }
-    .eg-btn-primary:hover:not(:disabled) { background:#253e7e; }
-    .eg-btn-primary:disabled { opacity:.4; cursor:default; }
-    .eg-btn-build { background:none; border-color:#5a4a2a; color:#d4a017; }
-    .eg-btn-build:hover:not(:disabled) { background:rgba(212,160,23,.1); }
-    .eg-btn-build:disabled { opacity:.4; cursor:default; }
-    .eg-loading { padding:40px 24px; text-align:center; color:var(--muted,#888); font-size:13px; }
-    /* Deploy view */
-    .eg-uc-list,.eg-target-list { display:flex; flex-direction:column; gap:4px; }
-    .eg-uc,.eg-target { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:6px; border:1px solid var(--border,#2a2a4a); cursor:pointer; }
-    .eg-uc:hover,.eg-target:hover { border-color:#3a3a6a; }
-    .eg-uc-selected,.eg-target-selected { border-color:#4a6aba; background:rgba(88,166,255,.05); }
-    .eg-uc input,.eg-target input { accent-color:#58a6ff; flex-shrink:0; }
-    .eg-uc-info,.eg-target-info { flex:1; display:flex; flex-direction:column; gap:2px; }
-    .eg-uc-name,.eg-target-name { font-size:13px; font-weight:600; color:var(--fg,#e0e0f0); }
-    .eg-uc-apps { font-size:11px; color:var(--muted,#666); }
-    .eg-target-desc { font-size:11px; color:var(--muted,#666); }
-    .eg-uc-build { font-size:11px; font-family:monospace; padding:2px 8px; border-radius:10px; }
-    .eg-uc-built { color:#4caf50; background:rgba(63,185,80,.1); border:1px solid rgba(63,185,80,.3); }
-    .eg-uc-notbuilt { color:var(--muted,#666); background:var(--bg-2,#1a1a1a); border:1px solid var(--border,#333); }
-    .eg-deploy-actions { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; }
-    .eg-action-group { display:flex; flex-direction:column; gap:6px; }
-    .eg-action-label { font-size:10px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.4px; }
-    .eg-action-row { display:flex; align-items:center; gap:8px; }
-    .eg-tag-preview { font-size:12px; font-family:monospace; color:var(--fg,#ccc); background:var(--bg-2,#1a1a2a); padding:5px 10px; border-radius:4px; border:1px solid var(--border,#2a2a4a); }
-    .eg-tag-select { font-size:12px; font-family:monospace; padding:5px 8px; min-width:140px; }
-    .eg-build-output { margin-top:12px; border:1px solid var(--border,#2a2a4a); border-radius:6px; overflow:hidden; }
-    .eg-build-status { padding:7px 12px; font-size:12px; font-weight:600; border-bottom:1px solid var(--border,#2a2a4a); }
-    .eg-build-running { color:#58a6ff; background:rgba(88,166,255,.07); }
-    .eg-build-ok  { color:#4caf50; background:rgba(63,185,80,.07); }
-    .eg-build-fail { color:#da3633; background:rgba(218,54,51,.07); }
-    .eg-build-log { margin:0; padding:12px; font-size:11px; font-family:monospace; white-space:pre-wrap; word-break:break-all; color:var(--fg,#ccc); max-height:320px; overflow-y:auto; }
-    html[data-theme="light"] .eg-tabs { border-bottom-color:#d0d0d0; }
-    html[data-theme="light"] .eg-tab { color:#888; }
-    html[data-theme="light"] .eg-tab-active { color:#1a1a2e; border-bottom-color:#4a6cf7; }
-    html[data-theme="light"] .eg-header-title { color:#1a1a2e; }
-    html[data-theme="light"] .eg-input,.eg-select,.eg-textarea { background:#f5f5ff; border-color:#c0c0e0; color:#1a1a2e; }
-    html[data-theme="light"] .eg-app:hover { background:#eaeaff; }
-    html[data-theme="light"] .eg-app-checked { background:#dde8ff; border-color:#aaccee; }
-    .eg-uc-row { display:flex; align-items:stretch; gap:4px; }
-    .eg-uc-row .eg-uc { flex:1; }
-    .eg-btn-edit, .eg-btn-del { background:none; border:1px solid var(--border,#2a2a4a); border-radius:6px; padding:0 10px; cursor:pointer; font-size:14px; color:var(--muted,#888); flex-shrink:0; }
-    .eg-btn-edit:hover { border-color:#58a6ff; color:#58a6ff; }
-    .eg-btn-del:hover  { border-color:#da3633; color:#da3633; }
-    .eg-warn-dialog { background:rgba(218,54,51,.07); border:1px solid rgba(218,54,51,.4); border-radius:8px; padding:16px; display:flex; gap:12px; align-items:flex-start; margin:8px 0; }
-    .eg-warn-dialog-icon { font-size:22px; flex-shrink:0; }
-    .eg-warn-dialog-body { flex:1; }
-    .eg-warn-dialog-title { font-size:13px; font-weight:700; color:#da3633; margin-bottom:6px; }
-    .eg-warn-dialog-msg { font-size:12px; color:var(--fg,#ccc); line-height:1.6; }
-    .eg-warn-dialog-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
-    .eg-btn-danger { background:#5a1a1a; border-color:#da3633; color:#ff8080; }
-    .eg-btn-danger:hover { background:#6a2020; }
-    html[data-theme="light"] .eg-uc,.eg-target { border-color:#d0d0e0; }
-    html[data-theme="light"] .eg-uc-selected,.eg-target-selected { border-color:#4a6cf7; background:#eef3ff; }
+    /* Layout */
+    #plugin-root { display:flex; flex-direction:column; height:100%; }
+    .erp-layout  { display:flex; flex:1; min-height:0; height:100%; }
+    .erp-panel   { width:220px; min-width:180px; flex-shrink:0; border-right:1px solid var(--border,#1e2030); overflow-y:auto; background:var(--bg,#111); }
+    .erp-main    { flex:1; overflow-y:auto; }
+    .erp-panel-inner { display:flex; flex-direction:column; gap:0; padding:8px 0; }
+    /* Sidebar */
+    .erp-new-btn { width:calc(100% - 16px); margin:0 8px 10px; padding:7px; background:#1e3a6e; border:1px solid #2a5aba; border-radius:6px; color:#7ab0ff; font-size:12px; font-weight:600; cursor:pointer; }
+    .erp-new-btn:hover { background:#253e7e; }
+    .erp-s-section { border-top:1px solid var(--border,#1e2030); }
+    .erp-s-hdr { display:flex; align-items:center; gap:5px; padding:7px 10px; font-size:11px; font-weight:600; color:var(--muted,#666); text-transform:uppercase; letter-spacing:.4px; cursor:pointer; user-select:none; }
+    .erp-s-hdr:hover { background:var(--bg-2,#1a1a1a); }
+    .erp-caret { font-size:9px; flex-shrink:0; }
+    .erp-s-count { margin-left:auto; font-size:10px; background:var(--bg-2,#222); padding:1px 5px; border-radius:8px; }
+    .erp-s-muted { margin-left:auto; font-size:10px; font-style:italic; text-transform:none; letter-spacing:0; }
+    .erp-s-spin { margin-left:auto; animation:spin .8s linear infinite; display:inline-block; }
+    .erp-s-uc-hdr { display:flex; align-items:center; gap:4px; padding:5px 10px 5px 14px; cursor:pointer; font-size:12px; color:var(--fg,#ccc); }
+    .erp-s-uc-hdr:hover { background:var(--bg-2,#1a1a1a); }
+    .erp-s-uc-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .erp-s-icon { background:none; border:none; cursor:pointer; font-size:12px; padding:1px 2px; opacity:.5; }
+    .erp-s-icon:hover { opacity:1; }
+    .erp-s-del:hover { color:#da3633; }
+    .erp-s-tags { padding:0 0 4px 0; }
+    .erp-s-tag { padding:4px 10px 4px 30px; font-size:11px; font-family:monospace; color:var(--muted,#888); cursor:pointer; }
+    .erp-s-tag:hover { background:var(--bg-2,#1a1a1a); color:var(--fg,#ccc); }
+    .erp-s-no-tags { padding:4px 10px 4px 30px; font-size:11px; color:var(--muted,#555); font-style:italic; cursor:pointer; }
+    .erp-s-empty { padding:8px 14px; font-size:11px; color:var(--muted,#555); }
+    .erp-s-error { padding:8px 14px; font-size:11px; color:#da3633; }
+    .erp-s-sel { background:rgba(88,166,255,.1) !important; color:#58a6ff !important; border-left:2px solid #58a6ff; }
+    /* Help */
+    .erp-help { display:flex; flex-direction:column; height:100%; }
+    .erp-help-toolbar { display:flex; align-items:center; gap:8px; padding:10px 16px; border-bottom:1px solid var(--border,#1e2030); flex-shrink:0; }
+    .erp-help-title { font-size:14px; font-weight:700; color:var(--fg,#e0e0f0); flex:1; }
+    .erp-help-body { padding:20px 24px; flex:1; overflow-y:auto; font-size:13px; line-height:1.7; color:var(--fg,#ddd); }
+    .erp-help-body h1 { font-size:20px; margin:0 0 12px; }
+    .erp-help-body h2 { font-size:15px; margin:20px 0 8px; color:var(--fg,#e0e0f0); }
+    .erp-help-body h3 { font-size:13px; margin:16px 0 6px; }
+    .erp-help-body ul { padding-left:20px; margin:4px 0; }
+    .erp-help-body li { margin:3px 0; }
+    .erp-help-body code { font-family:monospace; font-size:12px; background:rgba(88,166,255,.1); padding:1px 5px; border-radius:3px; color:#58a6ff; }
+    .erp-help-body pre.erp-code { background:var(--bg-2,#0d0d1e); padding:12px; border-radius:6px; border:1px solid var(--border,#2a2a4a); overflow-x:auto; font-size:12px; color:var(--fg,#cce0ff); }
+    .erp-help-body hr { border:none; border-top:1px solid var(--border,#1e2030); margin:16px 0; }
+    .erp-help-editor { flex:1; background:var(--bg-2,#0d0d1e); border:none; color:var(--fg,#e0e0f0); font-family:monospace; font-size:12px; padding:16px; resize:none; width:100%; box-sizing:border-box; min-height:400px; }
+    .erp-help-editor:focus { outline:none; }
+    /* Detail */
+    .erp-detail { padding:20px 24px; }
+    .erp-detail-hdr { margin-bottom:16px; }
+    .erp-detail-name { font-size:18px; font-weight:700; color:var(--fg,#e0e0f0); }
+    .erp-detail-apps { font-size:12px; color:var(--muted,#666); margin-top:2px; }
+    .erp-badge-remote { font-size:10px; background:rgba(88,166,255,.15); color:#58a6ff; border:1px solid rgba(88,166,255,.3); padding:1px 6px; border-radius:8px; margin-left:6px; vertical-align:middle; }
+    .erp-actions-grid { display:flex; flex-direction:column; gap:16px; }
+    .erp-action-block { display:flex; flex-direction:column; gap:6px; }
+    .erp-action-block-label { font-size:11px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.4px; display:flex; align-items:center; gap:6px; }
+    .erp-action-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .erp-action-danger { margin-top:8px; padding-top:16px; border-top:1px solid var(--border,#1e2030); }
+    .erp-target-list { display:flex; gap:8px; flex-wrap:wrap; }
+    .erp-target-opt { display:flex; align-items:center; gap:4px; padding:4px 10px; border-radius:4px; border:1px solid var(--border,#2a2a4a); cursor:pointer; font-size:12px; }
+    .erp-target-sel { border-color:#4a6aba; background:rgba(88,166,255,.07); }
+    /* Create */
+    .erp-wrap { max-width:780px; margin:0 auto; padding:20px 24px 40px; }
+    .erp-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+    .erp-header-icon { font-size:28px; }
+    .erp-header-title { font-size:17px; font-weight:700; color:var(--fg,#e0e0f0); }
+    .erp-header-sub { font-size:12px; color:var(--muted,#666); margin-top:2px; }
+    .erp-form { display:flex; flex-direction:column; gap:14px; }
+    .erp-row2 { display:grid; grid-template-columns:1fr auto; gap:12px; }
+    .erp-field { display:flex; flex-direction:column; gap:4px; }
+    .erp-section-label { font-size:11px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:8px; margin-top:4px; }
+    .erp-sel-count { font-weight:400; text-transform:none; letter-spacing:0; color:var(--fg,#aaa); }
+    .erp-label { font-size:12px; color:var(--fg,#ccc); }
+    .erp-hint  { font-weight:400; color:var(--muted,#666); }
+    .erp-input,.erp-select,.erp-textarea { background:var(--bg-2,#111128); border:1px solid var(--border,#2a2a4a); border-radius:6px; color:var(--fg,#e0e0f0); font-size:13px; padding:7px 10px; font-family:inherit; }
+    .erp-input:focus,.erp-select:focus,.erp-textarea:focus { outline:none; border-color:#4a6aba; }
+    .erp-textarea { resize:vertical; }
+    .erp-cat { margin-bottom:4px; }
+    .erp-cat-name { font-size:11px; font-weight:600; color:var(--muted,#555); margin:8px 0 4px; text-transform:uppercase; letter-spacing:.4px; }
+    .erp-app-list { display:flex; flex-direction:column; gap:2px; }
+    .erp-app { display:flex; align-items:center; gap:8px; padding:5px 10px; border-radius:5px; cursor:pointer; border:1px solid transparent; }
+    .erp-app:hover { background:var(--bg-2,#1a1a2a); }
+    .erp-app-checked { background:rgba(88,166,255,.07); border-color:rgba(88,166,255,.2); }
+    .erp-app input[type=checkbox] { accent-color:#58a6ff; width:14px; height:14px; flex-shrink:0; }
+    .erp-app-icon { font-size:13px; flex-shrink:0; }
+    .erp-app-name { font-size:13px; color:var(--fg,#e0e0f0); flex-shrink:0; }
+    .erp-app-ref  { font-size:11px; color:var(--muted,#666); font-family:monospace; margin-left:auto; }
+    .erp-preview { background:var(--bg-2,#0d0d1e); border:1px solid var(--border,#2a2a4a); border-radius:6px; overflow:hidden; }
+    .erp-preview-meta { font-size:12px; color:var(--muted,#888); padding:8px 12px; border-bottom:1px solid var(--border,#2a2a4a); }
+    .erp-saved { background:rgba(63,185,80,.07); border:1px solid rgba(63,185,80,.25); border-radius:6px; padding:12px 16px; display:flex; flex-direction:column; gap:6px; }
+    .erp-saved-title { font-size:13px; font-weight:600; color:var(--fg,#e0e0f0); }
+    .erp-saved-tag { font-size:12px; color:var(--muted,#888); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .erp-bump-badge { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:500; }
+    .erp-bump-initial { background:rgba(63,185,80,.15); color:#4caf50; border:1px solid rgba(63,185,80,.3); }
+    .erp-bump-patch   { background:rgba(88,166,255,.12); color:#58a6ff; border:1px solid rgba(88,166,255,.3); }
+    .erp-bump-release { background:rgba(210,153,34,.12);  color:#d4a017; border:1px solid rgba(210,153,34,.3); }
+    .erp-actions { display:flex; align-items:center; gap:12px; padding-top:4px; }
+    /* Shared buttons */
+    .erp-btn { padding:7px 18px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid; }
+    .erp-btn-save    { background:none; border-color:#3a5a3a; color:#4caf50; }
+    .erp-btn-save:hover:not(:disabled) { background:rgba(63,185,80,.1); }
+    .erp-btn-save:disabled { opacity:.4; cursor:default; }
+    .erp-btn-build   { background:none; border-color:#5a4a2a; color:#d4a017; }
+    .erp-btn-build:hover:not(:disabled) { background:rgba(212,160,23,.1); }
+    .erp-btn-build:disabled { opacity:.4; cursor:default; }
+    .erp-btn-primary { background:#1e3a6e; border-color:#2a5aba; color:#7ab0ff; }
+    .erp-btn-primary:hover:not(:disabled) { background:#253e7e; }
+    .erp-btn-primary:disabled { opacity:.4; cursor:default; }
+    .erp-btn-ghost   { background:none; border-color:var(--border,#444); color:var(--muted,#888); }
+    .erp-btn-ghost:hover { border-color:#888; color:var(--fg,#ccc); }
+    .erp-btn-danger  { background:#5a1a1a; border-color:#da3633; color:#ff8080; }
+    .erp-btn-danger:hover:not(:disabled) { background:#6a2020; }
+    .erp-btn-danger:disabled { opacity:.4; cursor:default; }
+    /* Shared elements */
+    .erp-tag-preview { font-size:12px; font-family:monospace; color:var(--fg,#ccc); background:var(--bg-2,#1a1a2a); padding:5px 10px; border-radius:4px; border:1px solid var(--border,#2a2a4a); }
+    .erp-tag-select  { font-size:12px; font-family:monospace; padding:5px 8px; min-width:140px; background:var(--bg-2,#111128); border:1px solid var(--border,#2a2a4a); border-radius:6px; color:var(--fg,#e0e0f0); }
+    .erp-code  { margin:0; padding:12px; font-size:12px; font-family:monospace; overflow-x:auto; color:var(--fg,#cce0ff); white-space:pre; }
+    .erp-notice { font-size:12px; color:var(--muted,#666); padding:10px 0; }
+    .erp-error  { background:rgba(218,54,51,.1); border-left:3px solid #da3633; padding:10px 14px; border-radius:4px; font-size:12px; color:#da3633; margin-bottom:12px; }
+    .erp-loading { padding:40px; text-align:center; color:var(--muted,#888); font-size:13px; }
+    .erp-warn-dialog { background:rgba(218,54,51,.07); border:1px solid rgba(218,54,51,.4); border-radius:8px; padding:16px; display:flex; gap:12px; align-items:flex-start; margin-bottom:16px; }
+    .erp-warn-dialog-icon { font-size:22px; flex-shrink:0; }
+    .erp-warn-dialog-body { flex:1; }
+    .erp-warn-dialog-title { font-size:13px; font-weight:700; color:#da3633; margin-bottom:6px; }
+    .erp-warn-dialog-msg   { font-size:12px; color:var(--fg,#ccc); line-height:1.6; }
+    .erp-warn-dialog-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+    .erp-build-output { margin-top:16px; border:1px solid var(--border,#2a2a4a); border-radius:6px; overflow:hidden; }
+    .erp-build-status { padding:7px 12px; font-size:12px; font-weight:600; border-bottom:1px solid var(--border,#2a2a4a); }
+    .erp-build-running { color:#58a6ff; background:rgba(88,166,255,.07); }
+    .erp-build-ok      { color:#4caf50; background:rgba(63,185,80,.07); }
+    .erp-build-fail    { color:#da3633; background:rgba(218,54,51,.07); }
+    .erp-build-log     { margin:0; padding:12px; font-size:11px; font-family:monospace; white-space:pre-wrap; word-break:break-all; color:var(--fg,#ccc); max-height:320px; overflow-y:auto; }
+    .erp-ver-help { font-size:10px; font-weight:400; text-transform:none; letter-spacing:0; color:#58a6ff; cursor:pointer; }
+    .erp-ver-help:hover { text-decoration:underline; }
+    .erp-ver-legend { background:var(--bg-2,#0d0d1e); border:1px solid var(--border,#2a2a4a); border-radius:6px; padding:10px 14px; margin-top:6px; font-size:11px; color:var(--muted,#888); line-height:1.8; }
+    .erp-ver-legend code { color:#58a6ff; background:rgba(88,166,255,.1); padding:1px 4px; border-radius:3px; }
+    .erp-ver-legend em { color:#4caf50; }
+    @keyframes spin { to { transform:rotate(360deg); } }
   `;
   document.head.appendChild(style);
 
-  initCreate();
-  loadDeployIfNeeded();
+  // ── Init ───────────────────────────────────────────────────────────────────
+
+  async function init() {
+    // Load help content, catalogue, and local use cases in parallel
+    const [helpData] = await Promise.all([
+      fetch(`${API}/api/help`).then(r => r.json()).catch(() => ({content:null})),
+      initCreate(),
+      loadLocal(),
+    ]);
+    state.help.content = helpData.content;
+    renderApp();
+  }
+
+  init();
 })();
