@@ -453,6 +453,66 @@ async function GET({ request, subpath }) {
     catch (e) { return new Response(e.message, { status: 500 }); }
   }
 
+  if (subpath === 'api/check-updates') {
+    const name = sp.get('name');
+    const tag  = sp.get('tag');
+    if (!name || !tag) return new Response('missing name or tag', { status: 400 });
+
+    const { execFileSync } = require('child_process');
+
+    // 1. Get image build timestamp
+    let imageCreated = null;
+    try {
+      const raw = execFileSync('docker', [
+        'inspect', '--format', '{{.Created}}',
+        `ghcr.io/cascadesteam/erp-${name}:${tag}`,
+      ], { encoding: 'utf-8', timeout: 5000 });
+      imageCreated = new Date(raw.trim());
+    } catch {
+      return Response.json({ hasImage: false, hasUpdates: false, updates: [] });
+    }
+
+    // 2. Load apps.json
+    const appsPath = path.join(VAULT_ROOT, 'use-cases', name, 'apps.json');
+    if (!fs.existsSync(appsPath)) {
+      return Response.json({ hasImage: true, hasUpdates: false, updates: [] });
+    }
+    const apps = JSON.parse(fs.readFileSync(appsPath, 'utf-8'));
+
+    // 3. Check latest commit per app branch (fail-open on rate limit / no token)
+    const updates = [];
+    for (const app of apps) {
+      const repo = (app.url || '').replace('https://github.com/', '');
+      if (!repo) continue;
+      try {
+        const commit = await githubRequest('GET', `/repos/${repo}/commits/${app.branch}`);
+        const commitDate = new Date(
+          commit.commit?.committer?.date || commit.commit?.author?.date
+        );
+        const hasUpdate = commitDate > imageCreated;
+        updates.push({
+          repo, branch: app.branch, hasUpdate,
+          commitDate: commitDate.toISOString(),
+          sha: (commit.sha || '').slice(0, 7),
+          message: (commit.commit?.message || '').split('\n')[0].slice(0, 72),
+        });
+      } catch {
+        // API unavailable or rate-limited — treat as unknown (fail open)
+        updates.push({ repo, branch: app.branch, hasUpdate: null });
+      }
+    }
+
+    const hasUpdates = updates.some(u => u.hasUpdate === true)
+                    || updates.every(u => u.hasUpdate === null); // all unknown → allow rebuild
+
+    return Response.json({
+      hasImage: true,
+      imageCreated: imageCreated.toISOString(),
+      hasUpdates,
+      updates,
+    });
+  }
+
   if (subpath === 'api/image-info') {
     const name = sp.get('name');
     const tag  = sp.get('tag');

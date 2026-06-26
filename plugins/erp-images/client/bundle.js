@@ -69,6 +69,7 @@ v16.1.0
       building: false, buildLog: [], buildDone: false, buildFailed: false,
       confirmDelete: null, deleting: false,
       confirmDeleteTag: null, deletingTag: false,
+      updateCheck: null,   // null=unchecked, {loading, hasUpdates, updates, imageCreated}
     },
   };
 
@@ -333,6 +334,33 @@ v16.1.0
       </div>`;
   }
 
+  function buildDisabled(d, isBuilt) {
+    if (d.building || !d.nextBuildTag) return true;
+    if (!isBuilt) return false; // first build — always allow
+    const uc = d.updateCheck;
+    if (!uc || uc.loading) return true;  // still checking
+    return !uc.hasUpdates;               // no updates available
+  }
+
+  function renderUpdateStatus(d) {
+    const uc = d.updateCheck;
+    if (!uc || uc.loading) {
+      return `<div class="erp-update-row erp-update-checking">⟳ Checking for updates…</div>`;
+    }
+    if (!uc.hasImage) return '';
+    if (!uc.hasUpdates) {
+      return `<div class="erp-update-row erp-update-current">✓ Up to date — no new commits on any branch</div>`;
+    }
+    const changed = (uc.updates || []).filter(u => u.hasUpdate);
+    return `<div class="erp-update-row erp-update-available">
+      ⬆ ${changed.length} app${changed.length!==1?'s':''} have new commits:
+      ${changed.map(u => `<span class="erp-update-app" title="${esc(u.message||'')}">
+        ${esc(u.repo.split('/')[1])}
+        ${u.sha ? `<code>${esc(u.sha)}</code>` : ''}
+      </span>`).join('')}
+    </div>`;
+  }
+
   function renderLocalActions(uc) {
     const d = state.detail;
     const isBuilt = uc && uc.builtTags.length > 0;
@@ -369,13 +397,14 @@ v16.1.0
           <span><code>patch</code> Updates only — safe drop-in replacement</span><br>
           <em>e.g. v16.1.0 → v16.1.3 → v16.2.0</em>
         </div>
+        ${isBuilt ? renderUpdateStatus(d) : ''}
         <div class="erp-da-build-row">
           <div class="erp-da-next">
             <span class="erp-da-next-label">Next tag</span>
             <code class="erp-tag-preview">${esc(d.nextBuildTag || '…')}</code>
           </div>
           <button class="erp-btn erp-btn-build" id="dp-build"
-            ${(d.building||!d.nextBuildTag)?'disabled':''}>
+            ${buildDisabled(d, isBuilt) ? 'disabled' : ''}>
             ${d.building ? '⏳ Building…' : isBuilt ? '🔨 Rebuild' : '🔨 Build'}
           </button>
         </div>
@@ -589,12 +618,14 @@ v16.1.0
     const d = state.detail;
     d.buildLog = []; d.buildDone = false; d.buildFailed = false;
     d.building = false; d.confirmDelete = null; d.nextBuildTag = ''; d.deployTag = '';
+    d.updateCheck = null;
     const uc = state.local.useCases.find(u => u.name === name);
     d.deployTag = tag || (uc?.builtTags ?? [])[0] || '';
     if (!d.targets.length) loadTargets();
     if (source === 'local') loadNextBuildTag(name);
     renderApp();
     pushRightPanel(uc ?? null, tag);
+    if (source === 'local' && (tag || d.deployTag)) checkUpdates(name, tag || d.deployTag);
   }
 
   function bindHelp() {
@@ -846,7 +877,11 @@ v16.1.0
       d.building = false; d.buildDone = code===0; d.buildFailed = code!==0;
       es.close();
       loadLocal().then(() => {
-        if (code===0) { d.deployTag = justBuilt; loadNextBuildTag(name); }
+        if (code===0) {
+          d.deployTag = justBuilt;
+          loadNextBuildTag(name);
+          checkUpdates(name, justBuilt); // new image is now the baseline
+        }
         renderApp();
       }).catch(() => renderApp());
     });
@@ -887,6 +922,22 @@ v16.1.0
     try {
       state.detail.targets = await fetch(`${API}/api/targets`).then(r => r.json());
     } catch { /* use empty */ }
+  }
+
+  async function checkUpdates(name, tag) {
+    if (!tag) return; // no built tag selected — nothing to check against
+    state.detail.updateCheck = { loading: true };
+    renderApp();
+    try {
+      const data = await fetch(`${API}/api/check-updates?name=${encodeURIComponent(name)}&tag=${encodeURIComponent(tag)}`).then(r => r.json());
+      if (state.sidebar.selUc === name && state.sidebar.selTag === tag) {
+        state.detail.updateCheck = { loading: false, ...data };
+        renderApp();
+      }
+    } catch {
+      state.detail.updateCheck = { loading: false, hasUpdates: true, updates: [] }; // fail open
+      renderApp();
+    }
   }
 
   async function loadNextBuildTag(name) {
@@ -996,6 +1047,13 @@ v16.1.0
     .erp-da-build-row { display:flex; align-items:center; gap:10px; }
     .erp-da-next { display:flex; align-items:center; gap:6px; flex:1; }
     .erp-da-next-label { font-size:11px; color:var(--muted,#666); flex-shrink:0; }
+    .erp-update-row { font-size:11px; padding:5px 8px; border-radius:4px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .erp-update-checking { color:var(--muted,#666); animation:pulse 1.5s ease-in-out infinite; }
+    .erp-update-current  { color:#4caf50; background:rgba(63,185,80,.07); }
+    .erp-update-available { color:#d4a017; background:rgba(212,160,23,.08); }
+    .erp-update-app { display:inline-flex; align-items:center; gap:3px; }
+    .erp-update-app code { font-family:monospace; font-size:10px; background:rgba(212,160,23,.15); padding:1px 4px; border-radius:3px; color:#d4a017; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
     /* Create */
     .erp-wrap { max-width:780px; margin:0 auto; padding:20px 24px 40px; }
     .erp-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
