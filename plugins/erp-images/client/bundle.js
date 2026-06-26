@@ -83,33 +83,38 @@ v16.1.0
 
   // ── Top-level render ───────────────────────────────────────────────────────
 
+  // ── Plugin registry ────────────────────────────────────────────────────────
+  // Registers with DocWright's plugin host so the layout can call mountSidebar()
+  // directly when the activity bar icon is clicked — no MutationObserver needed.
+
+  function mountSidebar() {
+    const el = document.getElementById('erp-images-sidebar-root');
+    if (!el) return;
+    el.innerHTML = renderSidebar();
+    bindSidebar();
+  }
+
+  function registerPlugin() {
+    window.__dw_plugins = window.__dw_plugins || new Map();
+    window.__dw_plugins.set('erp-images', { mountSidebar });
+    // If sidebar div already exists (e.g. leftView was already set), mount now
+    mountSidebar();
+  }
+
+  // ── Bridge accessor ────────────────────────────────────────────────────────
+  // Use host bridge if available (layout-level), fall back to page-level bridge.
+  const bridge = () => window.__docwright_host || window.__docwright || null;
+
   function renderApp() {
-    // Main content into #plugin-root
+    // Main content into #plugin-root (only when on plugin page)
     const mainEl = root();
     if (mainEl) mainEl.innerHTML = renderMain();
 
-    // Refresh sidebar if it's already mounted; otherwise watchForSidebar handles it
+    // Refresh sidebar if it's already mounted
     const sidebarEl = document.getElementById('erp-images-sidebar-root');
     if (sidebarEl) { sidebarEl.innerHTML = renderSidebar(); bindSidebar(); }
 
     bindAll();
-  }
-
-  function mountSidebar() {
-    const el = document.getElementById('erp-images-sidebar-root');
-    if (el) { el.innerHTML = renderSidebar(); bindSidebar(); return true; }
-    return false;
-  }
-
-  // Watch for the sidebar div to appear (Svelte may render it after the bundle fires)
-  function watchForSidebar() {
-    if (mountSidebar()) return; // already there
-    const obs = new MutationObserver(() => {
-      if (mountSidebar()) obs.disconnect();
-    });
-    obs.observe(document.body, { childList: true, subtree: true });
-    // Safety valve — disconnect after 10s regardless
-    setTimeout(() => obs.disconnect(), 10000);
   }
 
   function renderMain() {
@@ -612,6 +617,13 @@ v16.1.0
   }
 
   function selectUc(name, tag, source) {
+    // Write state to URL so it survives refresh and can be shared
+    const url = new URL(window.location.href);
+    url.searchParams.set('uc', name);
+    if (tag) url.searchParams.set('tag', tag);
+    else url.searchParams.delete('tag');
+    history.pushState(null, '', url.toString());
+
     const sb = state.sidebar;
     sb.selUc = name; sb.selTag = tag; sb.selSource = source;
     state.view = 'detail';
@@ -674,7 +686,7 @@ v16.1.0
     // Target dropdown
     document.getElementById('dp-target-select')?.addEventListener('change', e => { d.target = e.target.value; });
     document.getElementById('dp-deploy')?.addEventListener('click', () => {
-      window.__docwright?.notify({ type:'info', title:'Deploy', message:'Ansible deployment coming in the next phase.' });
+      bridge()?.notify({ type:'info', title:'Deploy', message:'Ansible deployment coming in the next phase.' });
     });
     document.getElementById('dp-del-tag')?.addEventListener('click', () => {
       d.confirmDeleteTag = state.sidebar.selTag; renderApp();
@@ -696,12 +708,12 @@ v16.1.0
         d.confirmDeleteTag = null; d.deletingTag = false;
         // Clear selection back to use case name (tag is gone)
         state.sidebar.selTag = null; d.deployTag = '';
-        window.__docwright?.toast(`Removed ${tag}`, 3000);
+        bridge()?.toast(`Removed ${tag}`, 3000);
         await loadLocal();
         loadNextBuildTag(name);
       } catch (err) {
         d.deletingTag = false;
-        window.__docwright?.notify({ type: 'error', title: 'Remove failed', message: err.message });
+        bridge()?.notify({ type: 'error', title: 'Remove failed', message: err.message });
         renderApp();
       }
     });
@@ -722,10 +734,10 @@ v16.1.0
         state.view = 'help';
         deployLoaded = false;
         loadLocal();
-        window.__docwright?.toast(`Deleted "${name}"${data.removedImages?.length?` + ${data.removedImages.length} image(s)`:''}`, 4000);
+        bridge()?.toast(`Deleted "${name}"${data.removedImages?.length?` + ${data.removedImages.length} image(s)`:''}`, 4000);
       } catch (err) {
         d.deleting = false;
-        window.__docwright?.notify({ type:'error', title:'Delete failed', message: err.message });
+        bridge()?.notify({ type:'error', title:'Delete failed', message: err.message });
         renderApp();
       }
     });
@@ -805,7 +817,7 @@ v16.1.0
 
   async function loadUseCase(name) {
     const res  = await fetch(`${API}/api/use-case?name=${encodeURIComponent(name)}`);
-    if (!res.ok) { window.__docwright?.toast(`Could not load ${name}`,3000); return; }
+    if (!res.ok) { bridge()?.toast(`Could not load ${name}`,3000); return; }
     const data = await res.json();
     const c    = state.create;
     c.name = data.name; c.description = data.description || ''; c.selectedApps.clear();
@@ -844,15 +856,14 @@ v16.1.0
   }
 
   async function pushRightPanel(uc, tag) {
-    if (!window.__docwright?.setRightPanel) return;
-    // Push immediately with what we know
-    window.__docwright.setRightPanel(renderProperties(uc, tag, null), 'Properties');
-    // Then enrich with docker inspect data if a tag is selected
+    const b = bridge();
+    if (!b?.setRightPanel) return;
+    b.setRightPanel(renderProperties(uc, tag, null), 'Properties');
     if (tag && uc) {
       try {
         const info = await fetch(`${API}/api/image-info?name=${encodeURIComponent(uc.name)}&tag=${encodeURIComponent(tag)}`).then(r => r.json());
         if (state.sidebar.selUc === uc.name && state.sidebar.selTag === tag) {
-          window.__docwright.setRightPanel(renderProperties(uc, tag, info), 'Properties');
+          b.setRightPanel(renderProperties(uc, tag, info), 'Properties');
         }
       } catch { /* non-fatal */ }
     }
@@ -1148,15 +1159,28 @@ v16.1.0
   // ── Init ───────────────────────────────────────────────────────────────────
 
   async function init() {
-    renderApp(); // render immediately with loading state
+    // Register with DocWright plugin host immediately (sidebar can mount before data loads)
+    registerPlugin();
+
+    renderApp(); // loading state in main content
+
     const [helpData] = await Promise.all([
       fetch(`${API}/api/help`).then(r => r.json()).catch(() => ({content:null})),
       initCreate(),
       loadLocal(),
     ]);
     state.help.content = helpData.content;
-    renderApp();
-    watchForSidebar();
+
+    // Restore state from URL query params
+    const params = new URLSearchParams(window.location.search);
+    const ucParam  = params.get('uc');
+    const tagParam = params.get('tag');
+    if (ucParam) {
+      selectUc(ucParam, tagParam || null, 'local');
+    } else {
+      renderApp();
+      mountSidebar();
+    }
   }
 
   init();
