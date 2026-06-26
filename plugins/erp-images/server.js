@@ -332,7 +332,10 @@ function buildStream(name, tag) {
 
 // ── Request routing ───────────────────────────────────────────────────────────
 
-async function GET({ subpath }) {
+async function GET({ request, subpath }) {
+  const url = new URL(request.url);
+  const sp  = url.searchParams;
+
   if (subpath === 'api/status') {
     const token = !!(process.env.GITHUB_TOKEN || process.env.GH_TOKEN);
     return Response.json({ status: 'ok', version: '0.1.0', github_token_set: token });
@@ -342,8 +345,8 @@ async function GET({ subpath }) {
     return Response.json(parseCatalogue());
   }
 
-  if (subpath.startsWith('api/next-version')) {
-    const major = new URL(`http://x?${subpath.split('?')[1] || ''}`).searchParams.get('major') || '16';
+  if (subpath === 'api/next-version') {
+    const major = sp.get('major') || '16';
     const tag   = await getNextVersion(major);
     return Response.json({ tag });
   }
@@ -356,11 +359,9 @@ async function GET({ subpath }) {
     return Response.json(listTargets());
   }
 
-  if (subpath.startsWith('api/build')) {
-    const qs    = subpath.includes('?') ? subpath.split('?')[1] : '';
-    const params = new URLSearchParams(qs);
-    const name  = params.get('name');
-    const tag   = params.get('tag') || `v${params.get('major') || '16'}-r1`;
+  if (subpath === 'api/build') {
+    const name = sp.get('name');
+    const tag  = sp.get('tag') || `v${sp.get('major') || '16'}-r1`;
     if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
       return new Response('invalid or missing name', { status: 400 });
     }
