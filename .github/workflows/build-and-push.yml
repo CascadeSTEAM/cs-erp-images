@@ -3,7 +3,7 @@ name: Build and Push ERPNext Images
 on:
   push:
     tags:
-      - "*-r*.*"         # e.g. erpnext16-r1.0, frappe16-r2.1
+      - "v*-r*-p*"       # e.g. v16-r1-p0, v16-r1-p2, v16-r2-p0
   workflow_dispatch:
     inputs:
       use_case:
@@ -11,7 +11,7 @@ on:
         required: true
         default: "all"
       tag:
-        description: "Image tag (e.g. erpnext16-r1.0)"
+        description: "Image tag (e.g. v16-r1-p0)"
         required: true
       frappe_branch:
         description: "Frappe branch for the base image"
@@ -46,9 +46,9 @@ jobs:
             echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
             echo "frappe_branch=${{ github.event.inputs.frappe_branch }}" >> $GITHUB_OUTPUT
           else
-            # Extract from git tag: erpnext16-r1.0 → frappe branch version-16
+            # Extract from git tag: v16-r1-p0 → frappe branch version-16
             TAG="${GITHUB_REF_NAME}"
-            MAJOR=$(echo "$TAG" | sed 's/[a-z]*\([0-9]*\)-.*/\1/')
+            MAJOR=$(echo "$TAG" | sed 's/^v\([0-9]*\)-.*/\1/')
             echo "tag=${TAG}" >> $GITHUB_OUTPUT
             echo "frappe_branch=version-${MAJOR}" >> $GITHUB_OUTPUT
           fi

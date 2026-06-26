@@ -130,7 +130,7 @@
             Next tag: <code>${esc(c.saveResult.nextTag)}</code>
             <span class="eg-bump-badge eg-bump-${esc(c.saveResult.bumpType)}">
               ${{ initial: '🟢 Initial build',
-                  build:   '⚡ Build update — patches, no breaking changes',
+                  patch:   '⚡ Patch rebuild — updates only, no breaking changes',
                   release: '⚠️ Release — possible breaking changes or additional config required',
                 }[c.saveResult.bumpType] || c.saveResult.bumpType}
             </span>
@@ -637,7 +637,7 @@
     .eg-saved-tag { font-size:12px; color:var(--muted,#888); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .eg-bump-badge { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:500; }
     .eg-bump-initial { background:rgba(63,185,80,.15); color:#4caf50; border:1px solid rgba(63,185,80,.3); }
-    .eg-bump-build   { background:rgba(88,166,255,.12); color:#58a6ff; border:1px solid rgba(88,166,255,.3); }
+    .eg-bump-patch   { background:rgba(88,166,255,.12); color:#58a6ff; border:1px solid rgba(88,166,255,.3); }
     .eg-bump-release { background:rgba(210,153,34,.12); color:#d4a017; border:1px solid rgba(210,153,34,.3); }
     .eg-actions { display:flex; align-items:center; gap:12px; padding-top:4px; }
     .eg-btn { padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid; }

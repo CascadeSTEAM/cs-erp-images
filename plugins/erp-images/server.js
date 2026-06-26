@@ -216,18 +216,16 @@ async function createPR({ name, description, frappeMajor, apps }) {
 
 // ── Versioning ────────────────────────────────────────────────────────────────
 
-function detectBase(apps) {
-  const hasErpNext = apps.some(a => (a.url || a.repo || '').includes('frappe/erpnext'));
-  return hasErpNext ? 'erpnext' : 'frappe';
-}
+// Tag format: v{frappe_major}-r{release}-p{patch}
+// e.g. v16-r1-p0  (first release, zero patches)
+//      v16-r1-p2  (same release, rebuilt twice with updates)
+//      v16-r2-p0  (new release, breaking/config change, patches reset)
 
-function calcNextTag(name, frappeMajor, apps, majorBump) {
-  const base   = detectBase(apps);
-  const prefix = `${base}${frappeMajor}`;
+function calcNextTag(name, frappeMajor, _apps, majorBump) {
   const { execFileSync } = require('child_process');
-  const TAG_RE = /^[a-z]+\d+-r(\d+)\.(\d+)$/;
+  const TAG_RE = /^v\d+-r(\d+)-p(\d+)$/;
 
-  let maxR = 0, maxB = 0, hasTag = false;
+  let maxR = 0, maxP = 0, hasTag = false;
   try {
     const out = execFileSync('docker', [
       'images', `ghcr.io/cascadesteam/erp-${name}`, '--format', '{{.Tag}}',
@@ -236,18 +234,18 @@ function calcNextTag(name, frappeMajor, apps, majorBump) {
       const m = tag.match(TAG_RE);
       if (m) {
         hasTag = true;
-        const r = parseInt(m[1], 10), b = parseInt(m[2], 10);
-        if (r > maxR || (r === maxR && b > maxB)) { maxR = r; maxB = b; }
+        const r = parseInt(m[1], 10), p = parseInt(m[2], 10);
+        if (r > maxR || (r === maxR && p > maxP)) { maxR = r; maxP = p; }
       }
     }
   } catch { /* docker unavailable */ }
 
-  let nextR, nextB, bumpType;
-  if (!hasTag)      { nextR = 1;       nextB = 0;       bumpType = 'initial'; }
-  else if (majorBump) { nextR = maxR + 1; nextB = 0;       bumpType = 'release'; }
-  else              { nextR = maxR;    nextB = maxB + 1; bumpType = 'build';   }
+  let nextR, nextP, bumpType;
+  if (!hasTag)        { nextR = 1;       nextP = 0;       bumpType = 'initial'; }
+  else if (majorBump) { nextR = maxR + 1; nextP = 0;       bumpType = 'release'; }
+  else                { nextR = maxR;    nextP = maxP + 1; bumpType = 'patch';   }
 
-  return { tag: `${prefix}-r${nextR}.${nextB}`, base, major: frappeMajor, release: nextR, build: nextB, bumpType };
+  return { tag: `v${frappeMajor}-r${nextR}-p${nextP}`, major: frappeMajor, release: nextR, patch: nextP, bumpType };
 }
 
 // ── Local save ───────────────────────────────────────────────────────────────
@@ -276,9 +274,9 @@ function saveLocal({ name, description, frappeMajor, apps, majorBump = false }) 
     .replace(/\{\{DESCRIPTION\}\}/g, description);
   fs.writeFileSync(path.join(ucDir, 'README.md'), readme, 'utf-8');
 
-  const { tag, base, major, release, build, bumpType } = calcNextTag(name, frappeMajor, apps, majorBump);
+  const { tag, major, release, patch, bumpType } = calcNextTag(name, frappeMajor, apps, majorBump);
   const buildCmd = `./scripts/build-local.sh ${name} ${tag}`;
-  return { path: `use-cases/${name}`, buildCmd, nextTag: tag, base, major, release, build, bumpType };
+  return { path: `use-cases/${name}`, buildCmd, nextTag: tag, major, release, patch, bumpType };
 }
 
 // ── Use-case list ────────────────────────────────────────────────────────────
