@@ -126,7 +126,7 @@
         ${c.saveResult ? `
         <div class="eg-saved">
           <div class="eg-saved-title">✅ Saved → <code>${esc(c.saveResult.path)}</code></div>
-          <div class="eg-saved-note">${c.editMode ? 'Updated.' : 'Switching to Deploy tab…'}</div>
+          <div class="eg-saved-note">Updated.</div>
         </div>` : ''}
 
         ${c.showChangeWarning ? `
@@ -379,18 +379,17 @@
         c.saveResult = data;
         c.saving = false;
         if (c.editMode) {
-          c.originalAppSet = new Set(c.selectedApps.keys()); // reset baseline
-          deployLoaded = false; // force deploy list refresh
+          c.originalAppSet = new Set(c.selectedApps.keys());
+          deployLoaded = false;
         }
+        state.deploy.selected = c.name;
+        state.view = 'deploy';
+        loadDeployIfNeeded();
         renderApp();
-        if (!c.editMode) {
-          setTimeout(() => {
-            state.deploy.selected = c.name;
-            state.view = 'deploy';
-            loadDeployIfNeeded();
-            renderApp();
-          }, 800);
-        }
+        state.deploy.selected = c.name;
+        state.view = 'deploy';
+        loadDeployIfNeeded();
+        renderApp();
       } catch (err) {
         c.saving = false;
         c.loadError = `Save failed: ${err.message}`;
