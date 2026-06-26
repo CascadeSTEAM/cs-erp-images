@@ -433,6 +433,16 @@ async function GET({ request, subpath }) {
     }
   }
 
+  if (subpath === 'api/next-tag') {
+    const name  = sp.get('name');
+    const major = sp.get('major') || '16';
+    if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
+      return new Response('invalid or missing name', { status: 400 });
+    }
+    const result = calcNextTag(name, major, [], false); // always patch bump for preview
+    return Response.json(result);
+  }
+
   if (subpath === 'api/build') {
     const name = sp.get('name');
     const tag  = sp.get('tag') || `v${sp.get('major') || '16'}-r1`;

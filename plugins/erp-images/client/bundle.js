@@ -31,9 +31,10 @@
       loading: true,
       useCases: [],    // [{name, apps, builtTags, source}]
       targets: [],     // [{id, name, type, description}]
-      selected: null,  // use case name
+      selected: null,   // use case name
       target: 'local',
-      tag: '',
+      nextBuildTag: '', // next tag to build (patch bump of latest)
+      deployTag: '',    // existing built tag selected for deploy
       building: false,
       buildLog: [],
       buildDone: false,
@@ -296,15 +297,35 @@
         <span class="eg-ver-example">e.g. <code>v16.1.0</code> → <code>v16.1.3</code> (3 patch rebuilds) → <code>v16.2.0</code> (app list changed)</span>
       </div>
         <div class="eg-deploy-actions">
-          <button class="eg-btn eg-btn-build" id="dp-build"
-            ${d.building ? 'disabled' : ''}>
-            ${d.building ? '⏳ Building…' : isBuilt ? '🔨 Rebuild' : '🔨 Build'}
-          </button>
-          ${isBuilt ? `<button class="eg-btn eg-btn-primary" id="dp-deploy"
-            ${d.building ? 'disabled' : ''}>
-            🚀 Deploy to ${esc(d.targets.find(t => t.id === d.target)?.name || d.target)}
-          </button>` : ''}
-          ${d.tag ? `<span class="eg-deploy-tag">tag: <code>${esc(d.tag)}</code></span>` : ''}
+          <div class="eg-action-group">
+            <div class="eg-action-label">Build</div>
+            <div class="eg-action-row">
+              <code class="eg-tag-preview">${esc(d.nextBuildTag || '…')}</code>
+              <button class="eg-btn eg-btn-build" id="dp-build"
+                ${(d.building || !d.nextBuildTag) ? 'disabled' : ''}>
+                ${d.building ? '⏳ Building…' : isBuilt ? '🔨 Rebuild' : '🔨 Build'}
+              </button>
+            </div>
+          </div>
+
+          ${isBuilt ? `
+          <div class="eg-action-group">
+            <div class="eg-action-label">Deploy</div>
+            <div class="eg-action-row">
+              ${sel.builtTags.length > 1
+                ? `<select class="eg-select eg-tag-select" id="dp-tag-select">
+                    ${sel.builtTags.map(t =>
+                      `<option value="${esc(t)}" ${t === d.deployTag ? 'selected' : ''}>${esc(t)}</option>`
+                    ).join('')}
+                   </select>`
+                : `<code class="eg-tag-preview">${esc(d.deployTag)}</code>`
+              }
+              <button class="eg-btn eg-btn-primary" id="dp-deploy"
+                ${(d.building || !d.deployTag) ? 'disabled' : ''}>
+                🚀 Deploy to ${esc(d.targets.find(t => t.id === d.target)?.name || d.target)}
+              </button>
+            </div>
+          </div>` : ''}
         </div>
 
         ${(d.building || d.buildLog.length > 0) ? `
@@ -451,21 +472,19 @@
     });
 
     document.querySelectorAll('input[name="eg-uc"]').forEach(r => {
-      r.addEventListener('change', async e => {
-        state.deploy.selected = e.target.value;
-        state.deploy.buildLog = [];
-        state.deploy.buildDone = false;
-        state.deploy.buildFailed = false;
-        state.deploy.building = false;
-        // fetch next version for tag suggestion
+      r.addEventListener('change', e => {
         const d = state.deploy;
+        d.selected = e.target.value;
+        d.buildLog = [];
+        d.buildDone = false;
+        d.buildFailed = false;
+        d.building = false;
+        d.nextBuildTag = '';
         const uc = d.useCases.find(u => u.name === d.selected);
-        if (uc) {
-          const major = '16'; // TODO: derive from uc apps
-          const res = await fetch(`${API}/api/next-version?major=${major}`);
-          if (res.ok) { const v = await res.json(); d.tag = v.tag; }
-        }
+        // Default deploy tag = most recent built tag
+        d.deployTag = (uc?.builtTags ?? [])[0] ?? '';
         renderApp();
+        loadNextBuildTag(d.selected);
       });
     });
 
@@ -473,11 +492,14 @@
       r.addEventListener('change', e => { state.deploy.target = e.target.value; renderApp(); });
     });
 
+    document.getElementById('dp-tag-select')?.addEventListener('change', e => {
+      state.deploy.deployTag = e.target.value;
+    });
+
     document.getElementById('dp-build')?.addEventListener('click', () => {
       const d = state.deploy;
-      if (!d.selected || d.building) return;
-      const tag = d.tag || 'v16-r1';
-      startBuild(d.selected, tag);
+      if (!d.selected || d.building || !d.nextBuildTag) return;
+      startBuild(d.selected, d.nextBuildTag);
     });
 
     document.getElementById('dp-ver-help-toggle')?.addEventListener('click', () => {
@@ -598,7 +620,10 @@
       d.loading = false;
       deployLoaded = true;
       if (!d.selected && ucs.length > 0) d.selected = ucs[0].name;
+      const selUc = d.useCases.find(u => u.name === d.selected);
+      d.deployTag = (selUc?.builtTags ?? [])[0] ?? '';
       renderApp();
+      if (d.selected) loadNextBuildTag(d.selected);
     }).catch(err => {
       d.loading = false;
       d.loadError = err.message;
@@ -641,6 +666,23 @@
     state.view = 'create';
     renderApp();
     fetchNextVersion();
+  }
+
+  async function loadNextBuildTag(name) {
+    const major = '16'; // TODO: derive from apps when we store frappeMajor on the use case
+    try {
+      const res = await fetch(`${API}/api/next-tag?name=${encodeURIComponent(name)}&major=${major}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (state.deploy.selected === name) {
+          state.deploy.nextBuildTag = data.tag;
+          // Re-render just the actions section without losing build log
+          const actEl = document.querySelector('.eg-deploy-actions');
+          if (actEl) actEl.outerHTML; // trigger by full re-render
+          renderApp();
+        }
+      }
+    } catch { /* non-fatal */ }
   }
 
   async function fetchNextVersion() {
@@ -747,8 +789,12 @@
     .eg-uc-build { font-size:11px; font-family:monospace; padding:2px 8px; border-radius:10px; }
     .eg-uc-built { color:#4caf50; background:rgba(63,185,80,.1); border:1px solid rgba(63,185,80,.3); }
     .eg-uc-notbuilt { color:var(--muted,#666); background:var(--bg-2,#1a1a1a); border:1px solid var(--border,#333); }
-    .eg-deploy-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .eg-deploy-tag { font-size:11px; color:var(--muted,#666); }
+    .eg-deploy-actions { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; }
+    .eg-action-group { display:flex; flex-direction:column; gap:6px; }
+    .eg-action-label { font-size:10px; font-weight:600; color:var(--muted,#555); text-transform:uppercase; letter-spacing:.4px; }
+    .eg-action-row { display:flex; align-items:center; gap:8px; }
+    .eg-tag-preview { font-size:12px; font-family:monospace; color:var(--fg,#ccc); background:var(--bg-2,#1a1a2a); padding:5px 10px; border-radius:4px; border:1px solid var(--border,#2a2a4a); }
+    .eg-tag-select { font-size:12px; font-family:monospace; padding:5px 8px; min-width:140px; }
     .eg-build-output { margin-top:12px; border:1px solid var(--border,#2a2a4a); border-radius:6px; overflow:hidden; }
     .eg-build-status { padding:7px 12px; font-size:12px; font-weight:600; border-bottom:1px solid var(--border,#2a2a4a); }
     .eg-build-running { color:#58a6ff; background:rgba(88,166,255,.07); }
