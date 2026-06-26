@@ -39,6 +39,8 @@
       buildDone: false,
       buildFailed: false,
       loadError: null,
+      confirmDelete: null,  // name pending delete confirmation
+      deleting: false,
     },
   };
 
@@ -224,6 +226,24 @@
         </div>
       </div>
 
+      ${d.confirmDelete ? `
+      <div class="eg-warn-dialog">
+        <div class="eg-warn-dialog-icon">🗑️</div>
+        <div class="eg-warn-dialog-body">
+          <div class="eg-warn-dialog-title">Delete local use case: <code>${esc(d.confirmDelete)}</code>?</div>
+          <div class="eg-warn-dialog-msg">
+            Removes <code>use-cases/${esc(d.confirmDelete)}/</code> and any local Docker images.
+            Cannot be undone. Use cases pushed to GitHub are protected and will be blocked.
+          </div>
+        </div>
+        <div class="eg-warn-dialog-actions">
+          <button class="eg-btn eg-btn-ghost" id="dp-del-cancel">Cancel</button>
+          <button class="eg-btn eg-btn-danger" id="dp-del-confirm" ${d.deleting ? 'disabled' : ''}>
+            ${d.deleting ? '⏳ Deleting…' : '🗑️ Delete permanently'}
+          </button>
+        </div>
+      </div>` : ''}
+
       <div class="eg-section-label">Use Case</div>
       ${d.useCases.length === 0
         ? `<div class="eg-notice">No local use cases found. <button class="eg-link" id="dp-go-create">Create one →</button></div>`
@@ -241,7 +261,10 @@
                   ${built ? `✅ ${uc.builtTags[0]}` : '○ Not built'}
                 </div>
               </label>
-              ${uc.source === 'local' ? `<button class="eg-btn-edit" data-edit="${esc(uc.name)}" title="Edit this use case">✏️</button>` : ''}
+              ${uc.source === 'local' ? `
+                <button class="eg-btn-edit" data-edit="${esc(uc.name)}" title="Edit this use case">✏️</button>
+                <button class="eg-btn-del" data-del="${esc(uc.name)}" title="Delete local use case and images">🗑️</button>
+              ` : ''}
             </div>`;
           }).join('')}
         </div>`
@@ -460,6 +483,43 @@
     document.getElementById('dp-ver-help-toggle')?.addEventListener('click', () => {
       const leg = document.getElementById('dp-ver-legend');
       if (leg) leg.style.display = leg.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.querySelectorAll('.eg-btn-del').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        state.deploy.confirmDelete = btn.dataset.del;
+        renderApp();
+      });
+    });
+
+    document.getElementById('dp-del-cancel')?.addEventListener('click', () => {
+      state.deploy.confirmDelete = null; renderApp();
+    });
+
+    document.getElementById('dp-del-confirm')?.addEventListener('click', async () => {
+      const d = state.deploy;
+      const name = d.confirmDelete;
+      d.deleting = true; renderApp();
+      try {
+        const res = await fetch(`${API}/api/delete-local`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        d.confirmDelete = null;
+        d.deleting = false;
+        if (d.selected === name) d.selected = null;
+        deployLoaded = false;
+        loadDeployIfNeeded();
+        window.__docwright?.toast(`Deleted "${name}"${data.removedImages?.length ? ` and ${data.removedImages.length} image(s)` : ''}`, 4000);
+      } catch (err) {
+        d.deleting = false;
+        window.__docwright?.notify({ type: 'error', title: 'Delete failed', message: err.message });
+        renderApp();
+      }
     });
 
     document.querySelectorAll('.eg-btn-edit').forEach(btn => {
@@ -704,8 +764,9 @@
     html[data-theme="light"] .eg-app-checked { background:#dde8ff; border-color:#aaccee; }
     .eg-uc-row { display:flex; align-items:stretch; gap:4px; }
     .eg-uc-row .eg-uc { flex:1; }
-    .eg-btn-edit { background:none; border:1px solid var(--border,#2a2a4a); border-radius:6px; padding:0 10px; cursor:pointer; font-size:14px; color:var(--muted,#888); flex-shrink:0; }
+    .eg-btn-edit, .eg-btn-del { background:none; border:1px solid var(--border,#2a2a4a); border-radius:6px; padding:0 10px; cursor:pointer; font-size:14px; color:var(--muted,#888); flex-shrink:0; }
     .eg-btn-edit:hover { border-color:#58a6ff; color:#58a6ff; }
+    .eg-btn-del:hover  { border-color:#da3633; color:#da3633; }
     .eg-warn-dialog { background:rgba(218,54,51,.07); border:1px solid rgba(218,54,51,.4); border-radius:8px; padding:16px; display:flex; gap:12px; align-items:flex-start; margin:8px 0; }
     .eg-warn-dialog-icon { font-size:22px; flex-shrink:0; }
     .eg-warn-dialog-body { flex:1; }

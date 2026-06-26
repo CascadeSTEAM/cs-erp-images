@@ -415,6 +415,24 @@ async function GET({ request, subpath }) {
     return Response.json(listTargets());
   }
 
+  if (subpath === 'api/use-case-published') {
+    const name = sp.get('name');
+    if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
+      return new Response('invalid name', { status: 400 });
+    }
+    const { execFileSync } = require('child_process');
+    try {
+      // If the file exists on origin/main it has been pushed
+      const out = execFileSync('git', [
+        'log', '--oneline', 'origin/main',
+        '--', `use-cases/${name}/apps.json`,
+      ], { cwd: VAULT_ROOT, encoding: 'utf-8', timeout: 5000 });
+      return Response.json({ published: out.trim().length > 0 });
+    } catch {
+      return Response.json({ published: false });
+    }
+  }
+
   if (subpath === 'api/build') {
     const name = sp.get('name');
     const tag  = sp.get('tag') || `v${sp.get('major') || '16'}-r1`;
@@ -434,6 +452,47 @@ async function POST({ request, subpath }) {
       const body = await request.json();
       const result = await createPR(body);
       return Response.json(result);
+    } catch (e) {
+      return Response.json({ error: e.message }, { status: 400 });
+    }
+  }
+
+  if (subpath === 'api/delete-local') {
+    try {
+      const { name } = await request.json();
+      if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) throw new Error('Invalid name');
+
+      // Hard block: refuse if the use case has ever been pushed to origin/main
+      const { execFileSync } = require('child_process');
+      try {
+        const log = execFileSync('git', [
+          'log', '--oneline', 'origin/main', '--', `use-cases/${name}/apps.json`,
+        ], { cwd: VAULT_ROOT, encoding: 'utf-8', timeout: 5000 });
+        if (log.trim().length > 0) {
+          return Response.json({
+            error: `"${name}" has been pushed to origin/main and may be in use. Deletion blocked. To remove it, open a PR on GitHub.`,
+          }, { status: 403 });
+        }
+      } catch { /* git unavailable — allow deletion */ }
+
+      // Remove use-cases/<name>/ directory
+      const ucDir = path.join(VAULT_ROOT, 'use-cases', name);
+      if (!fs.existsSync(ucDir)) throw new Error(`Use case "${name}" not found`);
+      fs.rmSync(ucDir, { recursive: true, force: true });
+
+      // Remove local Docker images for this use case
+      let removedImages = [];
+      try {
+        const images = execFileSync('docker', [
+          'images', `ghcr.io/cascadesteam/erp-${name}`, '--format', '{{.Repository}}:{{.Tag}}',
+        ], { encoding: 'utf-8', timeout: 5000 }).trim().split('\n').filter(Boolean);
+        for (const img of images) {
+          execFileSync('docker', ['rmi', img], { encoding: 'utf-8', timeout: 30000 });
+          removedImages.push(img);
+        }
+      } catch { /* docker unavailable or no images */ }
+
+      return Response.json({ deleted: name, removedImages });
     } catch (e) {
       return Response.json({ error: e.message }, { status: 400 });
     }
