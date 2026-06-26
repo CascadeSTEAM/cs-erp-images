@@ -326,11 +326,13 @@ v16.1.0
         <div class="erp-action-block">
           <div class="erp-action-block-label">Deploy</div>
           <div class="erp-action-row">
-            ${uc.builtTags.length > 1
-              ? `<select class="erp-select erp-tag-select" id="dp-tag-select">
-                  ${uc.builtTags.map(t=>`<option value="${esc(t)}" ${t===d.deployTag?'selected':''}>${esc(t)}</option>`).join('')}
-                 </select>`
-              : `<code class="erp-tag-preview">${esc(d.deployTag)}</code>`}
+            ${state.sidebar.selTag
+              ? `<code class="erp-tag-preview">${esc(d.deployTag)}</code>`
+              : uc.builtTags.length > 1
+                ? `<select class="erp-select erp-tag-select" id="dp-tag-select">
+                    ${uc.builtTags.map(t=>`<option value="${esc(t)}" ${t===d.deployTag?'selected':''}>${esc(t)}</option>`).join('')}
+                   </select>`
+                : `<code class="erp-tag-preview">${esc(d.deployTag)}</code>`}
             <button class="erp-btn erp-btn-primary" id="dp-deploy" ${(d.building||!d.deployTag)?'disabled':''}>
               🚀 ${esc(targetName)}
             </button>
