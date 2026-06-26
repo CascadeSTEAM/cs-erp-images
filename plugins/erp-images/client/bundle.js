@@ -129,9 +129,9 @@
           <div class="eg-saved-tag">
             Next tag: <code>${esc(c.saveResult.nextTag)}</code>
             <span class="eg-bump-badge eg-bump-${esc(c.saveResult.bumpType)}">
-              ${{ initial: '🟢 Initial build',
-                  patch:   '⚡ Patch rebuild — updates only, no breaking changes',
-                  release: '⚠️ Release — possible breaking changes or additional config required',
+              ${{ initial: '🟢 v{frappe}.1.0 — first build',
+                  patch:   '⚡ v{frappe}.{release}.{patch+1} — patch rebuild, no breaking changes',
+                  release: '⚠️ v{frappe}.{release+1}.0 — new release, breaking changes or config required',
                 }[c.saveResult.bumpType] || c.saveResult.bumpType}
             </span>
           </div>
@@ -261,7 +261,17 @@
       </div>
 
       ${sel ? `
-        <div class="eg-section-label" style="margin-top:16px">Actions</div>
+        <div class="eg-section-label" style="margin-top:16px">
+        Actions
+        <span class="eg-ver-help" id="dp-ver-help-toggle" title="Version format help">ⓘ versioning</span>
+      </div>
+      <div class="eg-ver-legend" id="dp-ver-legend" style="display:none">
+        <strong>Tag format: v{frappe}.{release}.{patch}</strong><br>
+        <span class="eg-ver-row"><code>frappe</code> Frappe major version — changes when you upgrade Frappe (16 → 17)</span>
+        <span class="eg-ver-row"><code>release</code> Increments when the app list changes or breaking config is required. Existing deployments may need rebuild or reconfiguration.</span>
+        <span class="eg-ver-row"><code>patch</code> Increments on rebuild with dependency or security updates only — safe drop-in replacement, no breaking changes.</span>
+        <span class="eg-ver-example">e.g. <code>v16.1.0</code> → <code>v16.1.3</code> (3 patch rebuilds) → <code>v16.2.0</code> (app list changed)</span>
+      </div>
         <div class="eg-deploy-actions">
           <button class="eg-btn eg-btn-build" id="dp-build"
             ${d.building ? 'disabled' : ''}>
@@ -445,6 +455,11 @@
       if (!d.selected || d.building) return;
       const tag = d.tag || 'v16-r1';
       startBuild(d.selected, tag);
+    });
+
+    document.getElementById('dp-ver-help-toggle')?.addEventListener('click', () => {
+      const leg = document.getElementById('dp-ver-legend');
+      if (leg) leg.style.display = leg.style.display === 'none' ? 'block' : 'none';
     });
 
     document.querySelectorAll('.eg-btn-edit').forEach(btn => {
@@ -638,6 +653,14 @@
     .eg-bump-badge { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:500; }
     .eg-bump-initial { background:rgba(63,185,80,.15); color:#4caf50; border:1px solid rgba(63,185,80,.3); }
     .eg-bump-patch   { background:rgba(88,166,255,.12); color:#58a6ff; border:1px solid rgba(88,166,255,.3); }
+    .eg-ver-help { font-size:10px; font-weight:400; text-transform:none; letter-spacing:0; color:#58a6ff; cursor:pointer; margin-left:6px; }
+    .eg-ver-help:hover { text-decoration:underline; }
+    .eg-ver-legend { background:var(--bg-2,#0d0d1e); border:1px solid var(--border,#2a2a4a); border-radius:6px; padding:12px 14px; margin:6px 0 10px; font-size:12px; color:var(--muted,#888); display:flex; flex-direction:column; gap:5px; }
+    .eg-ver-legend strong { color:var(--fg,#ccc); font-size:12px; }
+    .eg-ver-row { display:block; padding-left:4px; }
+    .eg-ver-row code { color:#58a6ff; background:rgba(88,166,255,.1); padding:1px 5px; border-radius:3px; font-size:11px; }
+    .eg-ver-example { margin-top:4px; font-style:italic; }
+    .eg-ver-example code { color:#4caf50; background:rgba(63,185,80,.1); padding:1px 5px; border-radius:3px; font-size:11px; }
     .eg-bump-release { background:rgba(210,153,34,.12); color:#d4a017; border:1px solid rgba(210,153,34,.3); }
     .eg-actions { display:flex; align-items:center; gap:12px; padding-top:4px; }
     .eg-btn { padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid; }

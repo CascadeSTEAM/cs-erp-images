@@ -216,14 +216,17 @@ async function createPR({ name, description, frappeMajor, apps }) {
 
 // ── Versioning ────────────────────────────────────────────────────────────────
 
-// Tag format: v{frappe_major}-r{release}-p{patch}
-// e.g. v16-r1-p0  (first release, zero patches)
-//      v16-r1-p2  (same release, rebuilt twice with updates)
-//      v16-r2-p0  (new release, breaking/config change, patches reset)
+// Tag format: v{frappe_major}.{release}.{patch}
+//   frappe_major  — Frappe major version (16, 15, 17…); changes when you upgrade Frappe
+//   release       — increments when the app list changes or breaking config is required;
+//                   existing deployments may need rebuilding or reconfiguration
+//   patch         — increments on rebuild with dependency/security updates only;
+//                   no breaking changes, safe drop-in replacement
+// Examples: v16.1.0  v16.1.3  v16.2.0  v15.4.1
 
 function calcNextTag(name, frappeMajor, _apps, majorBump) {
   const { execFileSync } = require('child_process');
-  const TAG_RE = /^v\d+-r(\d+)-p(\d+)$/;
+  const TAG_RE = /^v\d+\.(\d+)\.(\d+)$/;
 
   let maxR = 0, maxP = 0, hasTag = false;
   try {
@@ -245,7 +248,7 @@ function calcNextTag(name, frappeMajor, _apps, majorBump) {
   else if (majorBump) { nextR = maxR + 1; nextP = 0;       bumpType = 'release'; }
   else                { nextR = maxR;    nextP = maxP + 1; bumpType = 'patch';   }
 
-  return { tag: `v${frappeMajor}-r${nextR}-p${nextP}`, major: frappeMajor, release: nextR, patch: nextP, bumpType };
+  return { tag: `v${frappeMajor}.${nextR}.${nextP}`, major: frappeMajor, release: nextR, patch: nextP, bumpType };
 }
 
 // ── Local save ───────────────────────────────────────────────────────────────
