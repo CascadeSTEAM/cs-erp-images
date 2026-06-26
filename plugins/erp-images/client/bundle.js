@@ -560,7 +560,6 @@ v16.1.0
     if (!d.targets.length) loadTargets();
     if (source === 'local') loadNextBuildTag(name);
     renderApp();
-    const uc = state.local.useCases.find(u => u.name === name);
     pushRightPanel(uc ?? null, tag);
   }
 
