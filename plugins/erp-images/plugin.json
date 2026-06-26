@@ -7,6 +7,5 @@
   "icon": "🐳",
   "author": "NetYeti",
   "serverEntrypoint": "server.js",
-  "clientEntrypoint": "client/bundle.js",
-  "clientStylesheet": "client/style.css"
+  "clientEntrypoint": "client/bundle.js"
 }
