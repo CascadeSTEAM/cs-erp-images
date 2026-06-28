@@ -84,26 +84,27 @@ v16.1.0
   // ── Top-level render ───────────────────────────────────────────────────────
 
   // ── Plugin registry ────────────────────────────────────────────────────────
-  // Registers with DocWright's plugin host so the layout can call mountSidebar()
-  // directly when the activity bar icon is clicked — no MutationObserver needed.
+  // Registers with DocWright via registerView() so the layout calls mount(el)
+  // when the activity bar icon is activated — no getElementById needed.
+
+  let _sidebarEl = null; // element provided by DocWright's ViewContainerMount
 
   function mountSidebar() {
-    const el = document.getElementById('erp-images-sidebar-root');
-    if (!el) return;
-    el.innerHTML = renderSidebar();
+    if (!_sidebarEl) return;
+    _sidebarEl.innerHTML = renderSidebar();
     bindSidebar();
   }
 
   function registerPlugin() {
-    window.__dw_plugins = window.__dw_plugins || new Map();
-    window.__dw_plugins.set('erp-images', { mountSidebar });
-    // If sidebar div already exists (e.g. leftView was already set), mount now
-    mountSidebar();
+    window.__docwright?.registerView('erp-images', {
+      mount(el)    { _sidebarEl = el; mountSidebar(); },
+      unmount()    { _sidebarEl = null; },
+      onActivate() { mountSidebar(); },
+    });
   }
 
   // ── Bridge accessor ────────────────────────────────────────────────────────
-  // Use host bridge if available (layout-level), fall back to page-level bridge.
-  const bridge = () => window.__docwright_host || window.__docwright || null;
+  const bridge = () => window.__docwright?.bridge ?? null;
 
   function renderApp() {
     // Main content into #plugin-root (only when on plugin page)
@@ -111,8 +112,7 @@ v16.1.0
     if (mainEl) mainEl.innerHTML = renderMain();
 
     // Refresh sidebar if it's already mounted
-    const sidebarEl = document.getElementById('erp-images-sidebar-root');
-    if (sidebarEl) { sidebarEl.innerHTML = renderSidebar(); bindSidebar(); }
+    mountSidebar();
 
     bindAll();
   }
@@ -857,13 +857,13 @@ v16.1.0
 
   async function pushRightPanel(uc, tag) {
     const b = bridge();
-    if (!b?.setRightPanel) return;
-    b.setRightPanel(renderProperties(uc, tag, null), 'Properties');
+    if (!b?.claimRightPanel) return;
+    b.claimRightPanel(renderProperties(uc, tag, null), 'Properties');
     if (tag && uc) {
       try {
         const info = await fetch(`${API}/api/image-info?name=${encodeURIComponent(uc.name)}&tag=${encodeURIComponent(tag)}`).then(r => r.json());
         if (state.sidebar.selUc === uc.name && state.sidebar.selTag === tag) {
-          b.setRightPanel(renderProperties(uc, tag, info), 'Properties');
+          b.claimRightPanel(renderProperties(uc, tag, info), 'Properties');
         }
       } catch { /* non-fatal */ }
     }
