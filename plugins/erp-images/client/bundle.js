@@ -71,6 +71,20 @@ v16.1.0
       confirmDeleteTag: null, deletingTag: false,
       updateCheck: null,   // null=unchecked, {loading, hasUpdates, updates, imageCreated}
     },
+
+    deploy: {
+      // pre-filled from detail view
+      ucName: null, tag: null,
+      // saved sites
+      sites: [], loadingSites: false,
+      // form — new or editing saved site
+      selectedSite: '',   // '' = new, or site.name
+      name: '', host: '', user: 'root', proxy: '', workdir: '/home/frappe', notes: '',
+      saving: false, saveError: null,
+      // run
+      running: false, log: [], done: false, failed: false,
+      showVars: false,
+    },
   };
 
   // ── DOM helpers ────────────────────────────────────────────────────────────
@@ -118,8 +132,9 @@ v16.1.0
   }
 
   function renderMain() {
-    if (state.view === 'create') return renderCreateView();
-    if (state.view === 'detail') return renderDetailView();
+    if (state.view === 'create')  return renderCreateView();
+    if (state.view === 'detail')  return renderDetailView();
+    if (state.view === 'deploy')  return renderDeployView();
     return renderHelpView();
   }
 
@@ -435,6 +450,127 @@ v16.1.0
     </div>`;
   }
 
+  // ── DEPLOY VIEW ────────────────────────────────────────────────────────────
+
+  function renderDeployView() {
+    const d = state.deploy;
+    const image = `ghcr.io/cascadesteam/erp-${d.ucName}:${d.tag}`;
+    const site  = d.selectedSite ? d.sites.find(s => s.name === d.selectedSite) : null;
+    const host  = site ? site.host  : d.host;
+    const user  = site ? site.user  : d.user;
+    const proxy = site ? site.proxy : d.proxy;
+    const wdir  = site ? site.workdir : d.workdir;
+
+    const sshCmd = [
+      'ssh',
+      proxy ? `-J ${proxy}` : null,
+      `${user || 'root'}@${host || '<host>'}`,
+      `"cd ${wdir} && docker compose pull ${image} && docker compose up -d"`,
+    ].filter(Boolean).join(' ');
+
+    const ready = !!(d.ucName && d.tag && host);
+
+    return `<div class="erp-wrap">
+      <div class="erp-header">
+        <span class="erp-header-icon">🚀</span>
+        <div>
+          <div class="erp-header-title">Deploy</div>
+          <div class="erp-header-sub">
+            <code>ghcr.io/cascadesteam/erp-${esc(d.ucName)}:${esc(d.tag)}</code>
+          </div>
+        </div>
+        <button class="erp-btn erp-btn-ghost" id="dp2-back" style="margin-left:auto">← Back</button>
+      </div>
+
+      ${/* ── Site picker ── */''}
+      <div class="erp-section-label" style="margin-top:4px">Target Site</div>
+      <div class="erp-field">
+        <label class="erp-label" for="dp2-site-sel">Saved sites</label>
+        <select id="dp2-site-sel" class="erp-select">
+          <option value="">— New site —</option>
+          ${d.sites.map(s => `<option value="${esc(s.name)}" ${d.selectedSite===s.name?'selected':''}>${esc(s.name)} (${esc(s.host)})</option>`).join('')}
+        </select>
+      </div>
+
+      ${/* ── Site form ── */''}
+      <form id="dp2-form" class="erp-form" autocomplete="off">
+        <div class="erp-row2">
+          <div class="erp-field">
+            <label class="erp-label" for="dp2-name">Site name <span class="erp-hint">(label)</span></label>
+            <input id="dp2-name" class="erp-input" type="text" placeholder="support.cascadesteam.org"
+              value="${esc(site ? site.name : d.name)}" ${d.selectedSite ? 'readonly style="opacity:.6"' : ''}/>
+          </div>
+          <div class="erp-field">
+            <label class="erp-label" for="dp2-host">Host IP / hostname</label>
+            <input id="dp2-host" class="erp-input" type="text" placeholder="10.10.10.25"
+              value="${esc(host)}"/>
+          </div>
+        </div>
+        <div class="erp-row2">
+          <div class="erp-field">
+            <label class="erp-label" for="dp2-user">SSH user</label>
+            <input id="dp2-user" class="erp-input" type="text" placeholder="root" value="${esc(user)}"/>
+          </div>
+          <div class="erp-field">
+            <label class="erp-label" for="dp2-proxy">ProxyJump <span class="erp-hint">(optional)</span></label>
+            <input id="dp2-proxy" class="erp-input" type="text" placeholder="vpn.example.org:666" value="${esc(proxy)}"/>
+          </div>
+        </div>
+        <div class="erp-field">
+          <label class="erp-label" for="dp2-workdir">Working directory</label>
+          <input id="dp2-workdir" class="erp-input" type="text" value="${esc(wdir)}"/>
+        </div>
+        <div class="erp-field">
+          <label class="erp-label" for="dp2-notes">Notes <span class="erp-hint">(optional)</span></label>
+          <input id="dp2-notes" class="erp-input" type="text" value="${esc(site ? site.notes : d.notes)}"/>
+        </div>
+        <div class="erp-actions" style="gap:8px">
+          <button type="button" id="dp2-save-site" class="erp-btn erp-btn-ghost"
+            ${d.saving ? 'disabled' : ''}>${d.saving ? '⏳ Saving…' : '💾 Save site'}</button>
+          ${d.selectedSite ? `<button type="button" id="dp2-del-site" class="erp-btn erp-btn-ghost" style="color:#da3633;border-color:#da3633">🗑 Remove</button>` : ''}
+          ${d.saveError ? `<span class="erp-s-error">${esc(d.saveError)}</span>` : ''}
+        </div>
+      </form>
+
+      ${/* ── Command preview ── */''}
+      <div class="erp-section-label" style="margin-top:12px">
+        Deploy command
+        <button class="erp-copy-btn" id="dp2-copy" title="Copy to clipboard">📋</button>
+      </div>
+      <pre class="erp-deploy-cmd ${!ready?'erp-deploy-cmd-dim':''}">${esc(sshCmd)}</pre>
+
+      ${/* ── Ansible vars (collapsible) ── */''}
+      <div class="erp-section-label" style="cursor:pointer" id="dp2-vars-toggle">
+        Ansible vars <span class="erp-ver-help">${d.showVars ? '▲ hide' : '▼ show'}</span>
+      </div>
+      ${d.showVars ? `
+      <pre class="erp-deploy-cmd">${esc(JSON.stringify({
+        frappe_image: image,
+        site_host:    host || '<host>',
+        deploy_user:  user || 'root',
+        workdir:      wdir,
+      }, null, 2))}</pre>` : ''}
+
+      ${/* ── Run button + log ── */''}
+      <div class="erp-actions" style="margin-top:12px">
+        <button id="dp2-run" class="erp-btn erp-btn-build"
+          ${(!ready || d.running) ? 'disabled' : ''}>
+          ${d.running ? '⏳ Deploying…' : '🚀 Run deploy'}
+        </button>
+        ${!ready ? `<span class="erp-s-muted" style="font-size:11px">Fill in host to enable</span>` : ''}
+      </div>
+
+      ${(d.running || d.log.length > 0) ? `
+      <div class="erp-build-output">
+        <div class="erp-build-status ${d.done?'erp-build-ok':d.failed?'erp-build-fail':'erp-build-running'}">
+          ${d.done ? '✅ Deploy complete' : d.failed ? '❌ Deploy failed' : '⏳ Deploying…'}
+        </div>
+        <pre class="erp-build-log" id="dp2-log">${esc(d.log.join(''))}</pre>
+      </div>` : ''}
+
+    </div>`;
+  }
+
   // ── CREATE VIEW ────────────────────────────────────────────────────────────
 
   function renderCreateView() {
@@ -553,6 +689,7 @@ v16.1.0
     if (state.view === 'create') bindCreate();
     if (state.view === 'detail') bindDetail();
     if (state.view === 'help')   bindHelp();
+    if (state.view === 'deploy') bindDeploy();
   }
 
   function bindSidebar() {
@@ -686,7 +823,12 @@ v16.1.0
     // Target dropdown
     document.getElementById('dp-target-select')?.addEventListener('change', e => { d.target = e.target.value; });
     document.getElementById('dp-deploy')?.addEventListener('click', () => {
-      bridge()?.notify({ type:'info', title:'Deploy', message:'Ansible deployment coming in the next phase.' });
+      const dp = state.deploy;
+      dp.ucName = state.sidebar.selUc;
+      dp.tag    = state.detail.deployTag || state.sidebar.selTag;
+      dp.log    = []; dp.done = false; dp.failed = false; dp.running = false;
+      state.view = 'deploy';
+      loadDeploySites().then(() => renderApp());
     });
     document.getElementById('dp-del-tag')?.addEventListener('click', () => {
       d.confirmDeleteTag = state.sidebar.selTag; renderApp();
@@ -779,6 +921,137 @@ v16.1.0
       }
       doSave(false);
     });
+  }
+
+  // ── DEPLOY helpers ─────────────────────────────────────────────────────────
+
+  function bindDeploy() {
+    const d = state.deploy;
+
+    document.getElementById('dp2-back')?.addEventListener('click', () => {
+      state.view = 'detail'; renderApp();
+    });
+
+    document.getElementById('dp2-site-sel')?.addEventListener('change', e => {
+      d.selectedSite = e.target.value;
+      const site = d.sites.find(s => s.name === d.selectedSite);
+      if (site) {
+        d.name = site.name; d.host = site.host; d.user = site.user;
+        d.proxy = site.proxy; d.workdir = site.workdir; d.notes = site.notes;
+      }
+      renderApp();
+    });
+
+    // Sync form fields into state so command preview updates live
+    ['dp2-name','dp2-host','dp2-user','dp2-proxy','dp2-workdir','dp2-notes'].forEach(id => {
+      document.getElementById(id)?.addEventListener('input', e => {
+        const key = { 'dp2-name':'name','dp2-host':'host','dp2-user':'user',
+                      'dp2-proxy':'proxy','dp2-workdir':'workdir','dp2-notes':'notes' }[id];
+        d[key] = e.target.value;
+        // Rebuild command preview inline without full re-render
+        const cmd  = buildSshCmd(d);
+        const pre  = document.querySelector('.erp-deploy-cmd');
+        if (pre) pre.textContent = cmd;
+        if (pre) pre.classList.toggle('erp-deploy-cmd-dim', !deployReady(d));
+      });
+    });
+
+    document.getElementById('dp2-save-site')?.addEventListener('click', async () => {
+      const name = d.selectedSite || d.name;
+      if (!name || !d.host) { d.saveError = 'Name and host are required'; renderApp(); return; }
+      d.saving = true; d.saveError = null; renderApp();
+      try {
+        const res = await fetch(`${API}/api/deploy-sites`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, host: d.host, user: d.user, proxy: d.proxy, workdir: d.workdir, notes: d.notes }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        d.selectedSite = name;
+        await loadDeploySites();
+      } catch (e) { d.saveError = e.message; }
+      d.saving = false; renderApp();
+    });
+
+    document.getElementById('dp2-del-site')?.addEventListener('click', async () => {
+      if (!d.selectedSite) return;
+      await fetch(`${API}/api/delete-deploy-site`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: d.selectedSite }),
+      });
+      d.selectedSite = ''; d.name = ''; d.host = '';
+      await loadDeploySites(); renderApp();
+    });
+
+    document.getElementById('dp2-copy')?.addEventListener('click', () => {
+      navigator.clipboard?.writeText(buildSshCmd(d)).then(() => bridge()?.toast('Command copied', 2000));
+    });
+
+    document.getElementById('dp2-vars-toggle')?.addEventListener('click', () => {
+      d.showVars = !d.showVars; renderApp();
+    });
+
+    document.getElementById('dp2-run')?.addEventListener('click', () => {
+      if (!deployReady(d) || d.running) return;
+      startDeploy(d);
+    });
+  }
+
+  function deployReady(d) {
+    const site = d.selectedSite ? d.sites.find(s => s.name === d.selectedSite) : null;
+    return !!(d.ucName && d.tag && (site ? site.host : d.host));
+  }
+
+  function buildSshCmd(d) {
+    const site  = d.selectedSite ? d.sites.find(s => s.name === d.selectedSite) : null;
+    const host  = site ? site.host    : d.host;
+    const user  = site ? site.user    : d.user;
+    const proxy = site ? site.proxy   : d.proxy;
+    const wdir  = site ? site.workdir : d.workdir;
+    const image = `ghcr.io/cascadesteam/erp-${d.ucName}:${d.tag}`;
+    return [
+      'ssh',
+      proxy ? `-J ${proxy}` : null,
+      `${user || 'root'}@${host || '<host>'}`,
+      `"cd ${wdir} && docker compose pull ${image} && docker compose up -d"`,
+    ].filter(Boolean).join(' ');
+  }
+
+  function startDeploy(d) {
+    const site   = d.selectedSite ? d.sites.find(s => s.name === d.selectedSite) : null;
+    const host   = encodeURIComponent(site ? site.host    : d.host);
+    const user   = encodeURIComponent(site ? site.user    : d.user);
+    const proxy  = encodeURIComponent(site ? site.proxy   : d.proxy);
+    const workdir = encodeURIComponent(site ? site.workdir : d.workdir);
+    const name   = encodeURIComponent(d.ucName);
+    const tag    = encodeURIComponent(d.tag);
+
+    d.running = true; d.log = []; d.done = false; d.failed = false;
+    renderApp();
+
+    const url = `${API}/api/deploy-run?name=${name}&tag=${tag}&host=${host}&user=${user}&proxy=${proxy}&workdir=${workdir}`;
+    const es  = new EventSource(url);
+    es.onmessage = e => {
+      const { line } = JSON.parse(e.data);
+      d.log.push(line);
+      const logEl = document.getElementById('dp2-log');
+      if (logEl) { logEl.textContent += line; logEl.scrollTop = logEl.scrollHeight; }
+    };
+    es.addEventListener('done', e => {
+      const { code } = JSON.parse(e.data);
+      d.running = false; d.done = code === 0; d.failed = code !== 0;
+      es.close(); renderApp();
+      if (code === 0) bridge()?.toast(`Deployed ${d.ucName}:${d.tag}`, 4000);
+    });
+    es.addEventListener('error', () => { d.running = false; d.failed = true; es.close(); renderApp(); });
+  }
+
+  async function loadDeploySites() {
+    state.deploy.loadingSites = true;
+    try {
+      state.deploy.sites = await fetch(`${API}/api/deploy-sites`).then(r => r.json());
+    } catch { state.deploy.sites = []; }
+    state.deploy.loadingSites = false;
   }
 
   // ── CREATE helpers ─────────────────────────────────────────────────────────
@@ -1142,6 +1415,11 @@ v16.1.0
     .erp-ver-legend code { color:#58a6ff; background:rgba(88,166,255,.1); padding:1px 4px; border-radius:3px; }
     .erp-ver-legend em { color:#4caf50; }
     @keyframes spin { to { transform:rotate(360deg); } }
+    /* Deploy view */
+    .erp-deploy-cmd { background:var(--bg-2,#0d0d1e); border:1px solid var(--border,#2a2a4a); border-radius:6px; padding:12px 14px; font-size:12px; font-family:monospace; white-space:pre-wrap; word-break:break-all; color:var(--fg,#cce0ff); margin:0; }
+    .erp-deploy-cmd-dim { opacity:.45; }
+    .erp-copy-btn { background:none; border:none; cursor:pointer; font-size:13px; padding:0 4px; opacity:.6; vertical-align:middle; }
+    .erp-copy-btn:hover { opacity:1; }
     /* Properties panel (injected into DocWright's right panel) */
     .erp-p-header { font-size:14px; font-weight:700; color:var(--fg,#e0e0f0); margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border,#1e2030); }
     .erp-p-row { display:flex; justify-content:space-between; gap:8px; padding:4px 0; font-size:12px; border-bottom:1px solid rgba(255,255,255,.04); }

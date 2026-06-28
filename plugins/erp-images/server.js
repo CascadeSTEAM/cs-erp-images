@@ -563,6 +563,50 @@ async function GET({ request, subpath }) {
     }
   }
 
+  if (subpath === 'api/deploy-sites') {
+    const sitesPath = path.join(VAULT_ROOT, 'deploy-sites.json');
+    if (!fs.existsSync(sitesPath)) return Response.json([]);
+    try { return Response.json(JSON.parse(fs.readFileSync(sitesPath, 'utf-8'))); }
+    catch { return Response.json([]); }
+  }
+
+  if (subpath === 'api/deploy-run') {
+    const name    = sp.get('name');
+    const tag     = sp.get('tag');
+    const host    = sp.get('host');
+    const user    = sp.get('user') || 'root';
+    const proxy   = sp.get('proxy') || '';
+    const workdir = sp.get('workdir') || '/home/frappe';
+    if (!name || !tag || !host) return new Response('missing name, tag, or host', { status: 400 });
+
+    const image   = `ghcr.io/cascadesteam/erp-${name}:${tag}`;
+    const remoteCmd = `cd ${workdir} && docker compose pull ${image} && docker compose up -d`;
+    const sshArgs = [
+      ...(proxy ? ['-J', proxy] : []),
+      '-o', 'StrictHostKeyChecking=no',
+      `${user}@${host}`,
+      remoteCmd,
+    ];
+
+    const { spawn } = require('child_process');
+    const sse      = (obj)          => `data: ${JSON.stringify(obj)}\n\n`;
+    const sseEvent = (event, obj)   => `event: ${event}\ndata: ${JSON.stringify(obj)}\n\n`;
+
+    const stream = new ReadableStream({
+      start(ctrl) {
+        const enc  = (s) => ctrl.enqueue(Buffer.from(s));
+        const proc = spawn('ssh', sshArgs, { timeout: 120_000 });
+        proc.stdout.on('data', d => enc(sse({ line: d.toString() })));
+        proc.stderr.on('data', d => enc(sse({ line: d.toString() })));
+        proc.on('close', code => { enc(sseEvent('done', { code })); ctrl.close(); });
+        proc.on('error', err  => { enc(sseEvent('error', { message: err.message })); ctrl.close(); });
+      },
+    });
+    return new Response(stream, {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' },
+    });
+  }
+
   return new Response(`erp-images: unknown path "${subpath}"`, { status: 404 });
 }
 
@@ -644,6 +688,48 @@ async function POST({ request, subpath }) {
       const body = await request.json();
       const result = saveLocal(body);
       return Response.json(result);
+    } catch (e) {
+      return Response.json({ error: e.message }, { status: 400 });
+    }
+  }
+
+  if (subpath === 'api/deploy-sites') {
+    try {
+      const body = await request.json();
+      if (!body.name || !body.host) return Response.json({ error: 'name and host required' }, { status: 400 });
+      const sitesPath = path.join(VAULT_ROOT, 'deploy-sites.json');
+      let sites = [];
+      if (fs.existsSync(sitesPath)) {
+        try { sites = JSON.parse(fs.readFileSync(sitesPath, 'utf-8')); } catch { sites = []; }
+      }
+      const site = {
+        name:    body.name,
+        host:    body.host,
+        user:    body.user    || 'root',
+        proxy:   body.proxy   || '',
+        workdir: body.workdir || '/home/frappe',
+        notes:   body.notes   || '',
+      };
+      const idx = sites.findIndex(s => s.name === body.name);
+      if (idx >= 0) sites[idx] = site; else sites.push(site);
+      fs.writeFileSync(sitesPath, JSON.stringify(sites, null, 2) + '\n');
+      return Response.json({ ok: true, site });
+    } catch (e) {
+      return Response.json({ error: e.message }, { status: 400 });
+    }
+  }
+
+  if (subpath === 'api/delete-deploy-site') {
+    try {
+      const { name } = await request.json();
+      if (!name) return Response.json({ error: 'missing name' }, { status: 400 });
+      const sitesPath = path.join(VAULT_ROOT, 'deploy-sites.json');
+      if (fs.existsSync(sitesPath)) {
+        let sites = JSON.parse(fs.readFileSync(sitesPath, 'utf-8'));
+        sites = sites.filter(s => s.name !== name);
+        fs.writeFileSync(sitesPath, JSON.stringify(sites, null, 2) + '\n');
+      }
+      return Response.json({ ok: true });
     } catch (e) {
       return Response.json({ error: e.message }, { status: 400 });
     }
