@@ -62,7 +62,7 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ] || [ "$INPUT" = "all" ] || [ -z "$INPUT" ]; then
             CASES=$(ls use-cases/ | jq -R -s -c 'split("\n") | map(select(length > 0))')
           else
-            CASES=$(echo "$INPUT" | jq -R -s -c 'split(" ") | map(select(length > 0))')
+            CASES=$(echo "$INPUT" | tr ' ' '\n' | jq -R -s -c 'split("\n") | map(select(length > 0))')
           fi
           echo "use_cases=${CASES}" >> $GITHUB_OUTPUT
 
