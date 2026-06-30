@@ -38,5 +38,53 @@
   {
     "url": "https://github.com/The-Commit-Company/mint",
     "branch": "main"
+  },
+  {
+    "url": "https://github.com/bwhtech/buzz",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/gameplan",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/meet",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/drive",
+    "branch": "main"
+  },
+  {
+    "url": "https://github.com/frappe/suite",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/writer",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/sheets",
+    "branch": "main"
+  },
+  {
+    "url": "https://github.com/frappe/slides",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/mcp",
+    "branch": "main"
+  },
+  {
+    "url": "https://github.com/frappe/skills",
+    "branch": "main"
+  },
+  {
+    "url": "https://github.com/frappe/wiki",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/lms",
+    "branch": "develop"
   }
 ]

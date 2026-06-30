@@ -51,8 +51,8 @@ is released, a use-case assignment changes, or compatibility changes.
 | Mail | frappe/mail | main | watch-upstream | ⚠ unverified | official | — | JMAP frontend requiring Stalwart backend. CS staying on Google for now. **External alternative: Mailcow** (Docker, Postfix+Dovecot+Rspamd) connects to ERPNext via standard SMTP/IMAP — no Frappe app needed |
 | Builder | frappe/builder | develop | install | ⚠ unverified | official | cs | WYSIWYG website/page builder. Confirmed for cs image. Figma plugin available |
 | Builder Hub | frappe/builder_hub | develop | install | ⚠ unverified | official | cs | Template library for Builder — include alongside Builder |
-| AI / MCP | frappe/mcp | main | cs-dev | ⚠ unverified | official | cs-dev | Official Frappe AI framework. Evaluate in cs-dev before promoting to cs |
-| AI / Skills | frappe/skills | main | cs-dev | ⚠ unverified | official | cs-dev | AI skills framework. Evaluate in cs-dev before promoting to cs |
+| AI / MCP | frappe/mcp | main | install | ⚠ unverified | official | cs, cs-dev | Official Frappe AI framework. Promoted to cs 2026-06-30 (operator override — see Changelog) |
+| AI / Skills | frappe/skills | main | install | ⚠ unverified | official | cs, cs-dev | AI skills framework. Promoted to cs 2026-06-30 (operator override — see Changelog) |
 
 ---
 
@@ -61,11 +61,11 @@ is released, a use-case assignment changes, or compatibility changes.
 | App | Repo | Branch | Priority | Status | Source | Images | Notes |
 |-----|------|--------|----------|--------|--------|--------|-------|
 | Raven | The-Commit-Company/raven | develop | install | ⚠ unverified | community | cs | Real-time chat. Repo moved from frappe/raven. No version-16 branch — default is develop. **Needs test build before cs image release** |
-| Gameplan | frappe/gameplan | main | review | ⚠ unverified | official | — | Async team discussions. Raven sufficient for now; revisit if Raven channels become inadequate |
-| Meet | frappe/meet | main | cs-dev | 🚧 not-production | official | cs-dev | Video calling. Not production ready — trial only |
-| Drive | frappe/drive | main | cs-dev | 🚧 not-production | official | cs-dev | Google Drive replacement. Not production ready — trial only |
-| Suite | frappe/suite | main | cs-dev | 🚧 not-production | official | cs-dev | Office suite (Mail + Meet + Slides + Writer). Not production ready. Sub-apps: frappe/writer, frappe/sheets, frappe/slides |
-| Buzz | BuildWithHussain/buzz | main | cs-dev | ⚠ unverified | incubator | cs-dev | Event management. Incubator project — trial in cs-dev first |
+| Gameplan | frappe/gameplan | develop | install | ⚠ unverified | official | cs, cs-dev | Async team discussions. Promoted to cs 2026-06-30 (operator override — see Changelog). Branch corrected to develop |
+| Meet | frappe/meet | develop | install | 🚧 not-production | official | cs, cs-dev | Video calling. Promoted to cs 2026-06-30 (operator override — see Changelog). Branch corrected to develop (no main branch exists) |
+| Drive | frappe/drive | main | install | 🚧 not-production | official | cs, cs-dev | Google Drive replacement. Promoted to cs 2026-06-30 (operator override — see Changelog) |
+| Suite | frappe/suite | develop | install | 🚧 not-production | official | cs, cs-dev | Office suite (Mail + Meet + Slides + Writer). Promoted to cs 2026-06-30 (operator override — see Changelog). Sub-apps: frappe/writer@develop, frappe/sheets@main, frappe/slides@develop |
+| Buzz | bwhtech/buzz | develop | install | ⚠ unverified | incubator | cs, cs-dev | Event management. Org renamed from BuildWithHussain to bwhtech 2026-06-30. Promoted to cs 2026-06-30 (operator override — see Changelog) |
 
 ---
 
@@ -74,9 +74,9 @@ is released, a use-case assignment changes, or compatibility changes.
 | App | Repo | Branch | Priority | Status | Source | Images | Notes |
 |-----|------|--------|----------|--------|--------|--------|-------|
 | CRM | frappe/crm | main | install | ✅ confirmed | official | cs | Lead/deal/contact/client management |
-| Wiki | frappe/wiki | develop | cs-dev | ⚠ unverified | official | cs-dev | Public/internal knowledge base. Moved to cs-dev — evaluate before promoting to cs |
-| LMS | frappe/lms | main | review | ⚠ unverified | official | — | Training programs. **Hold for next round** — evaluate after cs image is stable |
-| Education | frappe/education | version-16 | cs-dev | ✅ confirmed | official | cs-dev | Student lifecycle, courses, fees. LinuxFest/conference use — not active, moved to cs-dev until needed |
+| Wiki | frappe/wiki | develop | install | ⚠ unverified | official | cs, cs-dev | Public/internal knowledge base. Promoted to cs 2026-06-30 (operator override — see Changelog) |
+| LMS | frappe/lms | develop | install | ⚠ unverified | official | cs | Training programs. Promoted to cs 2026-06-30 (operator override — see Changelog). Branch corrected to develop |
+| Education | frappe/education | version-16 | cs-dev | ✅ confirmed | official | cs-dev | Student lifecycle, courses, fees. LinuxFest/conference use — not active. **Explicitly excluded from cs 2026-06-30** per operator decision |
 | Insights (BI) | frappe/insights | main | install | ⚠ unverified | official | cs | Self-serve analytics and data visualization |
 | HRMS | frappe/hrms | version-16 | install | ✅ confirmed (v16.10.1) | official | cs | HR, contracting, timesheets, payroll. **CS internal use only** — client orgs are mostly volunteer-run |
 | Payments | frappe/payments | develop | install | ✅ confirmed | official | cs, nonprofit, restaurant | Payment gateway abstraction (Stripe, PayPal, Razorpay) |
@@ -228,3 +228,4 @@ community AI apps if the official stack doesn't cover the need.*
 | 2026-06-24 | Builder + Builder Hub → cs. Wiki → cs-dev. Insights → cs. |
 | 2026-06-24 | Education → cs-dev (LinuxFest work not active; move to cs-dev until needed) |
 | 2026-06-24 | Fix branch refs: raven/builder/builder_hub/wiki → develop (no main/version-16 branch exists) |
+| 2026-06-30 | Operator decision: promote Buzz, Gameplan, Meet, Drive, Suite (+writer/sheets/slides), AI mcp/skills, Wiki, LMS from cs-dev/review directly into `cs`, overriding prior staging gates, to prioritize MVP speed. Press and Mail remain excluded (hard architectural/dependency blockers); Education remains excluded (explicit operator call, LinuxFest work not active). Corrected stale branch refs: Buzz org BuildWithHussain → bwhtech; Meet/Gameplan/LMS → develop (verified against actual GitHub default branches) |
