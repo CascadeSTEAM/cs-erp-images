@@ -1,0 +1,8 @@
+id: no-work-before-approval
+kind: deterministic
+scope: [plan]
+synopsis: "Plans with status 'approved' or 'in-progress' must have assigned_to set; work cannot proceed without an assignee."
+version: 1
+ai_category: none
+distributable: true
+tags: [lifecycle, governance, plan, approval]

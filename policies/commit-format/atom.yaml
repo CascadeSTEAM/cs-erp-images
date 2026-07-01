@@ -1,0 +1,8 @@
+id: commit-format
+kind: deterministic
+scope: [git-commit]
+synopsis: "Commit messages must follow '<type>: <description>' where type is feat|fix|docs|refactor|test|chore|policy|decision."
+version: 1
+ai_category: none
+distributable: true
+tags: [git, commit, format]

@@ -1,0 +1,8 @@
+id: frontmatter-validate
+kind: deterministic
+scope: [proposal, plan]
+synopsis: "Proposals require: title, author, created, tags, approved, created_by, assigned_to. Plans require: title, status, author, created, proposal_source, priority, assigned_to."
+version: 1
+ai_category: none
+distributable: true
+tags: [frontmatter, proposal, plan, validation]
