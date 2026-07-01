@@ -112,7 +112,7 @@ v16.1.0
   function registerPlugin() {
     window.__docwright?.registerView('erp-images', {
       mount(el)    { _sidebarEl = el; mountSidebar(); },
-      unmount()    { _sidebarEl = null; },
+      unmount()    { if (_sidebarEl) _sidebarEl.innerHTML = ''; _sidebarEl = null; },
       onActivate() { mountSidebar(); },
     });
   }
