@@ -113,12 +113,20 @@ v16.1.0
     window.__docwright?.registerView('erp-images', {
       mount(el)    { _sidebarEl = el; mountSidebar(); },
       unmount()    { if (_sidebarEl) _sidebarEl.innerHTML = ''; _sidebarEl = null; },
-      onActivate() { mountSidebar(); },
+      onActivate() { mountSidebar(); autoNavigate(); },
     });
   }
 
   // ── Bridge accessor ────────────────────────────────────────────────────────
-  const bridge = () => window.__docwright?.bridge ?? null;
+  const bridge = () => window.__docwright?.bridge || window.__docwright_host || window.__docwright || null;
+
+  function autoNavigate() {
+    const b = bridge();
+    const nav = b?.navigate || b?.goto;
+    if (nav && window.location.pathname !== '/plugin/erp-images') {
+      nav.call(b, '/plugin/erp-images');
+    }
+  }
 
   function renderApp() {
     // Main content into #plugin-root (only when on plugin page)
@@ -706,7 +714,7 @@ v16.1.0
       const c = state.create;
       c.editMode = false; c.editName = null; c.name = ''; c.description = '';
       c.selectedApps.clear(); c.saveResult = null; c.showChangeWarning = false;
-      state.view = 'create'; renderApp(); fetchNextVersion();
+      state.view = 'create'; autoNavigate(); renderApp(); fetchNextVersion();
     });
 
     // Use case header click → expand/collapse (or open detail if no tags)
@@ -772,6 +780,7 @@ v16.1.0
     d.deployTag = tag || (uc?.builtTags ?? [])[0] || '';
     if (!d.targets.length) loadTargets();
     if (source === 'local') loadNextBuildTag(name);
+    autoNavigate();
     renderApp();
     pushRightPanel(uc ?? null, tag);
     if (source === 'local' && (tag || d.deployTag)) checkUpdates(name, tag || d.deployTag);
@@ -1130,13 +1139,14 @@ v16.1.0
 
   async function pushRightPanel(uc, tag) {
     const b = bridge();
-    if (!b?.claimRightPanel) return;
-    b.claimRightPanel(renderProperties(uc, tag, null), 'Properties');
+    const claim = b?.claimRightPanel || b?.setRightPanel;
+    if (!claim) return;
+    claim.call(b, renderProperties(uc, tag, null), 'Properties');
     if (tag && uc) {
       try {
         const info = await fetch(`${API}/api/image-info?name=${encodeURIComponent(uc.name)}&tag=${encodeURIComponent(tag)}`).then(r => r.json());
         if (state.sidebar.selUc === uc.name && state.sidebar.selTag === tag) {
-          b.claimRightPanel(renderProperties(uc, tag, info), 'Properties');
+          claim.call(b, renderProperties(uc, tag, info), 'Properties');
         }
       } catch { /* non-fatal */ }
     }
