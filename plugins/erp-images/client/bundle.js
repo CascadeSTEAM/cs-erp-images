@@ -118,13 +118,22 @@ v16.1.0
   }
 
   // ── Bridge accessor ────────────────────────────────────────────────────────
-  const bridge = () => window.__docwright?.bridge || window.__docwright_host || window.__docwright || null;
+  // Falls back through older DocWright host shapes, but only accepts a
+  // candidate that actually exposes bridge methods — otherwise unguarded
+  // callers like `bridge()?.toast(...)` would throw instead of no-op'ing.
+  const isBridgeLike = b => !!b && (
+    typeof b.toast === 'function' || typeof b.notify === 'function' ||
+    typeof b.navigate === 'function' || typeof b.goto === 'function' ||
+    typeof b.claimRightPanel === 'function' || typeof b.setRightPanel === 'function'
+  );
+  const bridge = () =>
+    [window.__docwright?.bridge, window.__docwright_host, window.__docwright].find(isBridgeLike) ?? null;
 
   function autoNavigate() {
     const b = bridge();
     const nav = b?.navigate || b?.goto;
     if (nav && window.location.pathname !== '/plugin/erp-images') {
-      nav.call(b, '/plugin/erp-images');
+      nav.call(b, '/plugin/erp-images' + window.location.search);
     }
   }
 
