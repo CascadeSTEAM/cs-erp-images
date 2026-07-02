@@ -6,6 +6,8 @@
   "description": "Frappe/ERPNext Docker image pipeline — define use cases, build images, deploy customer sites",
   "icon": "🐳",
   "author": "NetYeti",
+  "defaultRoute": "/plugin/erp-images",
+  "hasSearch": true,
   "serverEntrypoint": "server.js",
   "clientEntrypoint": "client/bundle.js"
 }

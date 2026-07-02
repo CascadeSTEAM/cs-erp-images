@@ -378,6 +378,47 @@ async function GET({ request, subpath }) {
     return Response.json({ status: 'ok', version: '0.1.0', github_token_set: token });
   }
 
+  if (subpath === 'api/search') {
+    const q = (sp.get('q') || '').toLowerCase();
+    const results = [];
+    if (q.length < 2) return Response.json([]);
+
+    // 1. Search use cases
+    const useCases = listUseCases();
+    for (const uc of useCases) {
+      if (uc.name.toLowerCase().includes(q)) {
+        results.push({
+          title: `Use Case: ${uc.name}`,
+          excerpt: `Frappe major: ${uc.apps[0]?.branch || 'unknown'}. Apps: ${uc.apps.map(a => a.url.split('/').pop()).join(', ')}`,
+          route: `/plugin/erp-images?usecase=${uc.name}`,
+          badge: 'Use Case',
+          badgeColor: 'var(--accent-2, #7c6af7)'
+        });
+      }
+    }
+
+    // 2. Search deploy sites
+    const sitesPath = path.join(VAULT_ROOT, 'deploy-sites.json');
+    if (fs.existsSync(sitesPath)) {
+      try {
+        const sites = JSON.parse(fs.readFileSync(sitesPath, 'utf-8'));
+        for (const s of sites) {
+          if (s.name.toLowerCase().includes(q) || s.host.toLowerCase().includes(q) || (s.notes && s.notes.toLowerCase().includes(q))) {
+            results.push({
+              title: `Deploy Site: ${s.name}`,
+              excerpt: `Host: ${s.host}. User: ${s.user}. Notes: ${s.notes || 'None'}`,
+              route: `/plugin/erp-images?site=${s.name}`,
+              badge: 'Deploy Site',
+              badgeColor: 'var(--accent-1, #4caf50)'
+            });
+          }
+        }
+      } catch {}
+    }
+
+    return Response.json(results);
+  }
+
   if (subpath === 'api/catalogue') {
     return Response.json(parseCatalogue());
   }
