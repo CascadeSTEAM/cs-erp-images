@@ -1,6 +1,14 @@
 .env
 *.local
 
+# Python cache and byte-code
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+
 # DocWright — managed entries (added by adopt-vault.ts)
 .dw-session.json
 node_modules
