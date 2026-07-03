@@ -95,20 +95,19 @@ jobs:
           TAG="${{ needs.discover.outputs.tag }}"
           FRAPPE_BRANCH="${{ needs.discover.outputs.frappe_branch }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.ORG }}/erp-${USE_CASE}"
-          APPS_JSON_B64=$(base64 -w 0 use-cases/${USE_CASE}/apps.json)
 
           docker buildx build \
             --platform linux/amd64 \
             --build-arg FRAPPE_PATH=https://github.com/frappe/frappe \
             --build-arg FRAPPE_BRANCH=${FRAPPE_BRANCH} \
-            --build-arg APPS_JSON_BASE64=${APPS_JSON_B64} \
+            --secret id=apps_json,src=use-cases/${USE_CASE}/apps.json \
             --tag ${IMAGE}:${TAG} \
             --tag ${IMAGE}:latest \
             --push \
             --cache-from type=gha,scope=${USE_CASE} \
             --cache-to type=gha,mode=max,scope=${USE_CASE} \
             --file images/custom/Containerfile \
-            https://github.com/frappe/frappe_docker.git
+            images/custom
 
       - name: Summary
         run: |

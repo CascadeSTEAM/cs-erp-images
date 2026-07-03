@@ -52,10 +52,6 @@
     "branch": "develop"
   },
   {
-    "url": "https://github.com/frappe/drive",
-    "branch": "main"
-  },
-  {
     "url": "https://github.com/frappe/suite",
     "branch": "develop"
   },
@@ -70,14 +66,6 @@
   {
     "url": "https://github.com/frappe/slides",
     "branch": "develop"
-  },
-  {
-    "url": "https://github.com/frappe/mcp",
-    "branch": "main"
-  },
-  {
-    "url": "https://github.com/frappe/skills",
-    "branch": "main"
   },
   {
     "url": "https://github.com/frappe/wiki",

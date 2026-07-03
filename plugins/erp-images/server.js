@@ -308,7 +308,13 @@ function listUseCases() {
       builtTags = out.trim().split('\n').filter(Boolean);
     } catch { /* docker unavailable or no image — leave empty */ }
 
-    results.push({ name: entry.name, apps, builtTags, source: 'local' });
+    let buildStatus = {};
+    const statusPath = path.join(ucDir, entry.name, 'build-status.json');
+    if (fs.existsSync(statusPath)) {
+      try { buildStatus = JSON.parse(fs.readFileSync(statusPath, 'utf-8')); } catch { /* malformed — leave empty */ }
+    }
+
+    results.push({ name: entry.name, apps, builtTags, buildStatus, source: 'local' });
   }
   return results;
 }

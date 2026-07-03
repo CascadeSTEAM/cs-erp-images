@@ -21,7 +21,6 @@ if [ ! -f "$APPS_JSON" ]; then
 fi
 
 IMAGE="ghcr.io/cascadesteam/erp-${USE_CASE}:${TAG}"
-APPS_JSON_B64=$(base64 -w 0 "$APPS_JSON")
 
 echo "Building: ${IMAGE}"
 echo "Frappe branch: ${FRAPPE_BRANCH}"
@@ -33,10 +32,10 @@ docker buildx build \
     --platform linux/amd64 \
     --build-arg FRAPPE_PATH=https://github.com/frappe/frappe \
     --build-arg FRAPPE_BRANCH="${FRAPPE_BRANCH}" \
-    --build-arg APPS_JSON_BASE64="${APPS_JSON_B64}" \
+    --secret id=apps_json,src="${APPS_JSON}" \
     --tag "${IMAGE}" \
-    --file images/custom/Containerfile \
-    https://github.com/frappe/frappe_docker.git
+    --file "${REPO_ROOT}/images/custom/Containerfile" \
+    "${REPO_ROOT}/images/custom"
 
 echo ""
 echo "Done: ${IMAGE}"

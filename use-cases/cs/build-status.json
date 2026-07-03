@@ -1,0 +1,115 @@
+{
+  "erpnext": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "version-16"
+  },
+  "helpdesk": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "main"
+  },
+  "crm": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "main"
+  },
+  "payments": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "hrms": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "version-16"
+  },
+  "raven": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "builder": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "builder_hub": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "insights": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "main"
+  },
+  "mint": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "main"
+  },
+  "buzz": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "gameplan": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "meet": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "drive": {
+    "state": "excluded",
+    "excluded_at": "2026-07-03T00:20:00Z",
+    "branch": "main",
+    "reason": "pnpm's ignored-build-scripts security gate blocks compiling the native `canvas` module during drive/frontend's postinstall, and exits non-zero with no non-interactive approval path (fixable via PNPM_CONFIG_DANGEROUSLY_ALLOW_ALL_BUILDS, not yet re-tested since being dropped)"
+  },
+  "suite": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "writer": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "sheets": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "main"
+  },
+  "slides": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "mcp": {
+    "state": "excluded",
+    "excluded_at": "2026-07-03T00:55:00Z",
+    "branch": "main",
+    "reason": "a Python dependency needs to compile pyo3-ffi 0.24.1 (Rust/Python FFI bindings), which does not yet support Python 3.14 -- the base image's Python version. Likely fixable by pinning an older PYTHON_VERSION build-arg."
+  },
+  "skills": {
+    "state": "excluded",
+    "excluded_at": "2026-07-03T01:34:49Z",
+    "branch": "main",
+    "reason": "repo ships without setup.py (pyproject.toml-only packaging); this bench version's install_app step still requires setup.py to exist and fails with FileNotFoundError. See auto-build-logs/cs-v16.2.0-attempt1.log for the full trace."
+  },
+  "wiki": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  },
+  "lms": {
+    "state": "verified",
+    "verified_at": "2026-07-03T02:15:35Z",
+    "branch": "develop"
+  }
+}
