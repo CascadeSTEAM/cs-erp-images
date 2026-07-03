@@ -95,11 +95,17 @@ jobs:
           TAG="${{ needs.discover.outputs.tag }}"
           FRAPPE_BRANCH="${{ needs.discover.outputs.frappe_branch }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.ORG }}/erp-${USE_CASE}"
+          # BuildKit doesn't key its cache on --secret content, only the RUN
+          # text -- without this, an unrelated cache hit under this scope can
+          # silently reuse a stale app-install layer built from a different
+          # apps.json (this is what caused v16.2.0 to ship with only frappe).
+          CACHE_BUST="$(sha256sum use-cases/${USE_CASE}/apps.json | cut -d' ' -f1)"
 
           docker buildx build \
             --platform linux/amd64 \
             --build-arg FRAPPE_PATH=https://github.com/frappe/frappe \
             --build-arg FRAPPE_BRANCH=${FRAPPE_BRANCH} \
+            --build-arg CACHE_BUST=${CACHE_BUST} \
             --secret id=apps_json,src=use-cases/${USE_CASE}/apps.json \
             --tag ${IMAGE}:${TAG} \
             --tag ${IMAGE}:latest \

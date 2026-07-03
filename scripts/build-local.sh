@@ -21,6 +21,11 @@ if [ ! -f "$APPS_JSON" ]; then
 fi
 
 IMAGE="ghcr.io/cascadesteam/erp-${USE_CASE}:${TAG}"
+# BuildKit does not key its cache on --secret *content*, only on the RUN
+# instruction text -- so an unchanged apps.json hash lets the app-install layer
+# cache normally, but any real change to apps.json forces a fresh install
+# instead of silently reusing a stale layer built with a different app list.
+CACHE_BUST="$(sha256sum "$APPS_JSON" | cut -d' ' -f1)"
 
 echo "Building: ${IMAGE}"
 echo "Frappe branch: ${FRAPPE_BRANCH}"
@@ -32,6 +37,7 @@ docker buildx build \
     --platform linux/amd64 \
     --build-arg FRAPPE_PATH=https://github.com/frappe/frappe \
     --build-arg FRAPPE_BRANCH="${FRAPPE_BRANCH}" \
+    --build-arg CACHE_BUST="${CACHE_BUST}" \
     --secret id=apps_json,src="${APPS_JSON}" \
     --tag "${IMAGE}" \
     --file "${REPO_ROOT}/images/custom/Containerfile" \
