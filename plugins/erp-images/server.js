@@ -117,10 +117,28 @@ function parseCatalogue() {
       const name = (row['app'] || '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim();
       if (!name) continue;
 
+      // Branch cell supports optional per-image overrides so bumping an
+      // app's catalogue-wide recommended branch never implies changing
+      // what's already pinned for a specific image:
+      //   "develop (cs: version-16, cs-dev: develop)"
+      const branchRaw = (row['branch'] || 'main').trim();
+      const overrideMatch = branchRaw.match(/^(.+?)\s*\(([^()]+)\)$/);
+      let branch = branchRaw;
+      let branchOverrides = null;
+      if (overrideMatch) {
+        branch = overrideMatch[1].trim();
+        branchOverrides = {};
+        for (const pair of overrideMatch[2].split(',')) {
+          const [img, br] = pair.split(':').map(s => s?.trim());
+          if (img && br) branchOverrides[img] = br;
+        }
+      }
+
       category.apps.push({
         name,
         repo:       repoMatch[1],
-        branch:     row['branch'] || 'main',
+        branch,
+        branchOverrides,
         status:     statusRaw.includes('✅') ? 'confirmed'
                   : statusRaw.includes('🚧') ? 'not-production'
                   : 'unverified',
@@ -267,15 +285,20 @@ function saveLocal({ name, description, frappeMajor, apps, majorBump = false }) 
   ) + '\n';
   fs.writeFileSync(path.join(ucDir, 'apps.json'), appsJson, 'utf-8');
 
-  // README.md from TEMPLATE.md
-  const templatePath = path.join(VAULT_ROOT, 'use-cases/TEMPLATE.md');
-  const template = fs.existsSync(templatePath)
-    ? fs.readFileSync(templatePath, 'utf-8')
-    : `# {{NAME}}\n\n**Image:** \`ghcr.io/cascadesteam/erp-{{NAME}}\`\n\n{{DESCRIPTION}}\n`;
-  const readme = template
-    .replace(/\{\{NAME\}\}/g, name)
-    .replace(/\{\{DESCRIPTION\}\}/g, description);
-  fs.writeFileSync(path.join(ucDir, 'README.md'), readme, 'utf-8');
+  // README.md from TEMPLATE.md — only scaffold it on first creation. Once a
+  // README exists, treat it as hand-curated (apps table, incompatibilities,
+  // deployment notes) and never clobber it on subsequent saves.
+  const readmePath = path.join(ucDir, 'README.md');
+  if (!fs.existsSync(readmePath)) {
+    const templatePath = path.join(VAULT_ROOT, 'use-cases/TEMPLATE.md');
+    const template = fs.existsSync(templatePath)
+      ? fs.readFileSync(templatePath, 'utf-8')
+      : `# {{NAME}}\n\n**Image:** \`ghcr.io/cascadesteam/erp-{{NAME}}\`\n\n{{DESCRIPTION}}\n`;
+    const readme = template
+      .replace(/\{\{NAME\}\}/g, name)
+      .replace(/\{\{DESCRIPTION\}\}/g, description);
+    fs.writeFileSync(readmePath, readme, 'utf-8');
+  }
 
   const { tag, major, release, patch, bumpType } = calcNextTag(name, frappeMajor, apps, majorBump);
   const buildCmd = `./scripts/build-local.sh ${name} ${tag}`;

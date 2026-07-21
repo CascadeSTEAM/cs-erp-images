@@ -667,22 +667,31 @@ v16.1.0
     </div>`;
   }
 
+  // An app's catalogue "Branch" is the default recommendation; a row can
+  // narrow that per image (see parseCatalogue on the server) so bumping the
+  // default never rewrites what a specific image is actually pinned to.
+  function branchFor(app, imageName) {
+    return (imageName && app.branchOverrides && app.branchOverrides[imageName]) || app.branch;
+  }
+
   function renderCatalogue() {
     const c = state.create;
     if (!c.catalogue.length) return '<div class="erp-notice">No apps loaded.</div>';
+    const imageName = c.name || c.editName;
     return c.catalogue.map(cat => `
       <div class="erp-cat">
         <div class="erp-cat-name">${esc(cat.name)}</div>
         <div class="erp-app-list">
           ${cat.apps.map(app => {
             const checked = c.selectedApps.has(app.repo);
+            const branch  = branchFor(app, imageName);
             return `<label class="erp-app ${checked?'erp-app-checked':''}">
               <input type="checkbox" class="eg-app-cb"
-                data-repo="${esc(app.repo)}" data-branch="${esc(app.branch)}" data-name="${esc(app.name)}"
+                data-repo="${esc(app.repo)}" data-branch="${esc(branch)}" data-name="${esc(app.name)}"
                 ${checked?'checked':''}/>
               <span class="erp-app-icon">${app.statusIcon}</span>
               <span class="erp-app-name">${esc(app.name)}</span>
-              <span class="erp-app-ref">${esc(app.repo)}@${esc(app.branch)}</span>
+              <span class="erp-app-ref">${esc(app.repo)}@${esc(branch)}</span>
             </label>`;
           }).join('')}
         </div>

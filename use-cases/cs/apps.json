@@ -48,10 +48,6 @@
     "branch": "develop"
   },
   {
-    "url": "https://github.com/frappe/meet",
-    "branch": "develop"
-  },
-  {
     "url": "https://github.com/frappe/suite",
     "branch": "develop"
   },
@@ -74,5 +70,9 @@
   {
     "url": "https://github.com/frappe/lms",
     "branch": "develop"
+  },
+  {
+    "url": "https://github.com/The-Commit-Company/raven-cloud",
+    "branch": "main"
   }
 ]

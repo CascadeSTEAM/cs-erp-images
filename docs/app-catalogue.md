@@ -17,7 +17,7 @@ is released, a use-case assignment changes, or compatibility changes.
 | **Priority** | `install` = decided · `review` = under consideration · `vertical` = client-deployment specific · `built-in` = already in ERPNext/Frappe · `watch-upstream` = not ready, track for future · `revisit-at-scale` = right tool but premature · `cs-dev` = assigned to CS-DEV (trial/experimental) image |
 | **Status** | `✅ confirmed` working on v16 · `⚠ unverified` branch exists, untested · `❌ incompatible` known broken · `🗄 archived` repo archived · `🚧 not-production` flagged unstable |
 | **Source** | `official` = frappe org · `community` = third-party · `fork` = fork of archived official · `incubator` = frappe-funded community project |
-| **Branch** | Branch/tag to use in `apps.json` for v16 |
+| **Branch** | Default branch/tag to use in `apps.json` for v16. Can be narrowed per image with `default (image: branch, image: branch)`, e.g. `develop (cs: version-16, cs-dev: develop)` — this only changes what the picker recommends for that image; it never rewrites a branch a use case has already pinned in its own `apps.json` |
 | **Images** | Which use-case images include this app. `cs` = CS production · `cs-dev` = CS development/trial · future: `nonprofit`, `restaurant`, `makerspace` |
 
 ---
@@ -229,3 +229,4 @@ community AI apps if the official stack doesn't cover the need.*
 | 2026-06-24 | Education → cs-dev (LinuxFest work not active; move to cs-dev until needed) |
 | 2026-06-24 | Fix branch refs: raven/builder/builder_hub/wiki → develop (no main/version-16 branch exists) |
 | 2026-06-30 | Operator decision: promote Buzz, Gameplan, Meet, Drive, Suite (+writer/sheets/slides), AI mcp/skills, Wiki, LMS from cs-dev/review directly into `cs`, overriding prior staging gates, to prioritize MVP speed. Press and Mail remain excluded (hard architectural/dependency blockers); Education remains excluded (explicit operator call, LinuxFest work not active). Corrected stale branch refs: Buzz org BuildWithHussain → bwhtech; Meet/Gameplan/LMS → develop (verified against actual GitHub default branches) |
+| 2026-07-17 | Branch column now supports optional per-image overrides (`default (image: branch, ...)`), so refreshing an app's recommended branch can never retroactively change what a use case already has pinned in its own `apps.json`. No existing rows changed — all current use cases (`cs`, `cs-dev`, `helpdesk`, `website-only`) already agree with the catalogue default for every shared app |
