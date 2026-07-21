@@ -1,0 +1,26 @@
+[
+  {
+    "url": "https://github.com/frappe/erpnext",
+    "branch": "version-16"
+  },
+  {
+    "url": "https://github.com/frappe/builder",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/builder_hub",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/The-Commit-Company/raven",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/suite",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/The-Commit-Company/raven-cloud",
+    "branch": "main"
+  }
+]

@@ -50,8 +50,9 @@ dispatch in GitHub Actions, specifying the use case name and tag.
 ./scripts/build-local.sh helpdesk v16.23.1-r1
 ```
 
-Requires Docker Buildx. Pulls the upstream `frappe_docker` Containerfile
-directly from GitHub so no local copy is needed.
+Requires Docker Buildx. Builds from this repo's customized Containerfile at
+`images/custom/Containerfile` (originally derived from upstream
+`frappe_docker`).
 
 ## Deployment
 
