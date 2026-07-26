@@ -149,6 +149,30 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
   echo "{}" > sites/common_site_config.json && \
   find apps -mindepth 1 -path "*/.git" | xargs rm -fr
 
+# frappe/wiki (develop) registers add_wiki_user_role on User.after_insert; it
+# saves the mid-insert doc whose `modified` is already stale once sibling
+# apps' hooks touch the row, so every new-User insert dies with
+# TimestampMismatchError (#7). Upstream master removed the hook entirely;
+# until the develop pin catches up, re-fetch the user before assigning the
+# role. Skips cleanly when the wiki app or the old pattern is absent.
+RUN <<'PATCH_WIKI'
+python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("/home/frappe/frappe-bench/apps/wiki/wiki/utils.py")
+if not p.exists():
+    print("wiki User-hook patch: wiki app not present, skipped")
+else:
+    s = p.read_text()
+    old = '\tdoc.add_roles("Wiki User")'
+    new = '\tfrappe.get_doc("User", doc.name).add_roles("Wiki User")'
+    if old in s:
+        p.write_text(s.replace(old, new))
+        print("wiki User-hook patch: applied")
+    else:
+        print("wiki User-hook patch: pattern absent, skipped")
+PYEOF
+PATCH_WIKI
+
 FROM base AS backend
 
 USER frappe
