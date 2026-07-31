@@ -1,0 +1,172 @@
+{
+  "_meta": {
+    "ticket": "CS-0055",
+    "step": 3,
+    "site": "new.cascadesteam.org",
+    "purpose": "One form for content creators to learn. entry_type drives which listing the record joins and which Builder template renders it; depends_on hides everything irrelevant so a creator sees ~7 fields at a time.",
+    "decisions": {
+      "banner": "Collapsed from the legacy SIX banner fields (banner, banner-display, banner-fade, banner-x, banner-y, banner-height, content-start) to ONE optional image (owner, 2026-07-31). 31 of 37 legacy pages used the identical logo and nobody ever meaningfully varied the positioning, so porting the controls would add learning cost for no real use. The template handles framing. Easy to add back; hard to remove once creators see them.",
+      "published_default": "0 — nothing is public until explicitly ticked.",
+      "naming": "hash, NOT field:route. field:route would rename the record whenever a route changes, which breaks every reference. route stays a plain unique field instead."
+    }
+  },
+
+  "doctype_definition": {
+    "doctype": "DocType",
+    "name": "Website Entry",
+    "module": "Website",
+    "custom": 1,
+    "naming_rule": "Random",
+    "autoname": "hash",
+    "title_field": "title",
+    "search_fields": "title,entry_type,route",
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "track_changes": 1,
+    "allow_rename": 1,
+    "editable_grid": 0,
+    "quick_entry": 0,
+    "fields": [
+      { "fieldname": "title", "label": "Title", "fieldtype": "Data", "reqd": 1,
+        "in_list_view": 1, "in_standard_filter": 0,
+        "description": "Shown as the page heading and in listings." },
+
+      { "fieldname": "entry_type", "label": "Type", "fieldtype": "Select", "reqd": 1,
+        "options": "Group\nProject\nPerson\nPage\nNews",
+        "in_list_view": 1, "in_standard_filter": 1,
+        "description": "Decides which listing this appears in and how it is laid out." },
+
+      { "fieldname": "route", "label": "Web address", "fieldtype": "Data", "reqd": 1,
+        "unique": 1, "in_list_view": 1,
+        "description": "The part after the slash, e.g. <code>cyber</code>. Lowercase, no spaces. Changing this breaks existing links." },
+
+      { "fieldname": "summary", "label": "Short summary", "fieldtype": "Small Text",
+        "description": "One or two sentences. Used on cards and as the search-engine description." },
+
+      { "fieldname": "cb_1", "fieldtype": "Column Break" },
+
+      { "fieldname": "banner", "label": "Banner image", "fieldtype": "Attach Image",
+        "description": "Optional. Leave empty to use the Cascade STEAM logo." },
+
+      { "fieldname": "tags", "label": "Tags", "fieldtype": "Table MultiSelect",
+        "options": "Website Entry Tag" },
+
+      { "fieldname": "published", "label": "Published", "fieldtype": "Check", "default": "0",
+        "in_list_view": 1, "in_standard_filter": 1,
+        "description": "Nothing appears on the website until this is ticked." },
+
+      { "fieldname": "featured", "label": "Feature on the home page", "fieldtype": "Check",
+        "default": "0" },
+
+      { "fieldname": "sec_body", "fieldtype": "Section Break", "label": "Content" },
+
+      { "fieldname": "body", "label": "Body", "fieldtype": "Text Editor",
+        "description": "The page content. Headings, links, lists and images all work." },
+
+      { "fieldname": "sec_news", "fieldtype": "Section Break", "label": "News",
+        "depends_on": "eval:doc.entry_type=='News'" },
+      { "fieldname": "published_on", "label": "Date", "fieldtype": "Date",
+        "depends_on": "eval:doc.entry_type=='News'" },
+
+      { "fieldname": "sec_person", "fieldtype": "Section Break", "label": "Person",
+        "depends_on": "eval:doc.entry_type=='Person'" },
+      { "fieldname": "role_title", "label": "Role", "fieldtype": "Data",
+        "depends_on": "eval:doc.entry_type=='Person'",
+        "description": "e.g. President" },
+      { "fieldname": "photo", "label": "Photo", "fieldtype": "Attach Image",
+        "depends_on": "eval:doc.entry_type=='Person'" },
+      { "fieldname": "cb_person", "fieldtype": "Column Break",
+        "depends_on": "eval:doc.entry_type=='Person'" },
+      { "fieldname": "email", "label": "Email", "fieldtype": "Data", "options": "Email",
+        "depends_on": "eval:doc.entry_type=='Person'" },
+      { "fieldname": "linkedin", "label": "LinkedIn", "fieldtype": "Data",
+        "depends_on": "eval:doc.entry_type=='Person'" },
+
+      { "fieldname": "sec_adv", "fieldtype": "Section Break", "label": "Advanced",
+        "collapsible": 1 },
+      { "fieldname": "sort_order", "label": "Sort order", "fieldtype": "Int", "default": "0",
+        "description": "Lower numbers appear first. Leave at 0 to sort alphabetically." },
+      { "fieldname": "parent_entry", "label": "Belongs to", "fieldtype": "Link",
+        "options": "Website Entry",
+        "description": "Optional. E.g. a Project that belongs to a Group." }
+    ],
+    "permissions": [
+      { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 },
+      { "role": "Website Content Author", "read": 1, "write": 1, "create": 1, "delete": 0 }
+    ]
+  },
+
+  "child_doctype": {
+    "_why": "Table MultiSelect needs a child doctype with a Link field. Linking to core `Tag` keeps tagging native.",
+    "doctype": "DocType",
+    "name": "Website Entry Tag",
+    "module": "Website",
+    "custom": 1,
+    "istable": 1,
+    "fields": [
+      { "fieldname": "tag", "label": "Tag", "fieldtype": "Link", "options": "Tag",
+        "in_list_view": 1, "reqd": 1 }
+    ]
+  },
+
+  "event_custom_fields": {
+    "_why": "Events use core `Event` (calendar view for free) extended with Custom Fields, per the decision that ERPNext becomes canonical for events.",
+    "doctype": "Event",
+    "fields": [
+      { "fieldname": "publish_on_website", "label": "Show on the website",
+        "fieldtype": "Check", "default": "0", "insert_after": "event_category" },
+      { "fieldname": "route", "label": "Web address", "fieldtype": "Data", "unique": 1,
+        "depends_on": "eval:doc.publish_on_website", "insert_after": "publish_on_website" },
+      { "fieldname": "summary", "label": "Short summary", "fieldtype": "Small Text",
+        "depends_on": "eval:doc.publish_on_website", "insert_after": "route" },
+      { "fieldname": "banner", "label": "Banner image", "fieldtype": "Attach Image",
+        "depends_on": "eval:doc.publish_on_website", "insert_after": "summary" },
+      { "fieldname": "location", "label": "Location", "fieldtype": "Data",
+        "depends_on": "eval:doc.publish_on_website", "insert_after": "banner" },
+      { "fieldname": "rsvp_url", "label": "RSVP link", "fieldtype": "Data",
+        "depends_on": "eval:doc.publish_on_website", "insert_after": "location",
+        "description": "Usually the Meetup event page. RSVPs are not handled here." }
+    ],
+    "customize_form": {
+      "_why": "Core Event's form is calendar-operator oriented and cluttered for a content creator. Hide what they never need; this is native Customize Form, not code.",
+      "hide": ["repeat_this_event", "repeat_on", "repeat_till", "monday", "tuesday",
+               "wednesday", "thursday", "friday", "saturday", "sunday",
+               "send_reminder", "event_participants", "sync_with_google_calendar",
+               "google_calendar", "google_calendar_id", "google_calendar_event_id",
+               "pulled_from_google_calendar", "add_video_conferencing", "event_type"],
+      "_note": "event_type (Public/Private) is hidden because publish_on_website is the gate content creators actually use. Confirm nothing else on this bench depends on event_type before hiding it."
+    }
+  },
+
+  "role": {
+    "doctype": "Role",
+    "role_name": "Website Content Author",
+    "desk_access": 1,
+    "_permissions_required_beyond_the_two_content_doctypes": [
+      "File: create + write — WITHOUT this, attaching an image silently fails",
+      "Tag: read + write — WITHOUT this, the tags field is unusable"
+    ],
+    "_must_not_have": ["Builder Page", "Builder Component", "Builder Variable"],
+    "_why": "This is the hard boundary that makes the two-tier split real rather than a convention. A role scoped only to the two content doctypes looks correct but cannot do the job."
+  },
+
+  "route_collision_guard": {
+    "_problem": "A unique constraint on Website Entry.route only prevents collisions WITHIN the doctype. The flat :slug scheme shares one URL namespace with every static Builder Page route, so an entry routed `home`, `events` or `groups` would be silently shadowed by the static page — the creator's page simply never appears, with no error.",
+    "_fix": "A validate hook rejecting any route that matches an existing Builder Page.route (or a reserved-word list).",
+    "_how": "Frappe's built-in `Server Script` doctype (type: DocType Event, DocType: Website Entry, event: Before Save). Requires `server_script_enabled: 1` in site_config — confirm before relying on it, otherwise this needs a small app.",
+    "_reserved_besides_builder_routes": ["app", "api", "assets", "files", "login",
+      "builder", "home", "groups", "projects", "events", "news", "about"]
+  },
+
+  "workspace": {
+    "doctype": "Workspace",
+    "label": "Website Content",
+    "_why": "A Desk landing page with only what a creator needs, so they never navigate the wider ERPNext menu.",
+    "shortcuts": [
+      { "label": "Pages, groups & projects", "link_to": "Website Entry", "type": "DocType" },
+      { "label": "Events", "link_to": "Event", "type": "DocType" },
+      { "label": "Add a news post", "link_to": "Website Entry", "type": "DocType",
+        "_note": "route_options entry_type=News" }
+    ]
+  }
+}
