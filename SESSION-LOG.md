@@ -19,6 +19,24 @@
 
 ---
 
+## Session: 2026-07-31 — CS website theming (CS-0055)
+
+**Focus:** Theming overhaul + templated content model for `new.cascadesteam.org`
+
+**Completed:**
+- [x] docs: CS website design system + content model (#9)
+- [x] feat: CS website composition tooling + resume state (#10, open)
+- [x] Step 0 — backups, 13 Builder Snapshots, state export attached to CS-0055
+- [x] Step 1/1b — 50 Builder Variables live (17 Color, 33 Dimension)
+- [x] Step 2 — 11 components published; header/footer restyled in place
+- [x] Filed CS-0059, CS-0061, CS-0062, CS-0063
+
+**In flight at session end:** steps 3+4 (Website Entry doctype + content migration) — result not seen.
+
+**Session note:** `docs/session-notes/session_note_202607311650.md`
+
+---
+
 ## Session: 2026-07-31 — Helpdesk data + credential cleanup
 
 **Focus:** Helpdesk data + credential cleanup
