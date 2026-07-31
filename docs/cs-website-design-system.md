@@ -80,6 +80,28 @@ below to what they *do*, preserving exact values.
 **The rule that defines the site's feel:** `accent` (orange) never changes between modes;
 `primary` shifts navy → cyan.
 
+### Decision: accent-only orange (owner, 2026-07-31)
+
+Brand orange returns as an **interaction and emphasis colour only**. Cyan stays the
+*structural* brand colour — hero band, headings, large surfaces.
+
+| Orange **is** used for | Orange is **not** used for |
+|------------------------|----------------------------|
+| Hover/focus/active states on every interactive element (§7) | Section-heading underlines (the legacy `h2` rule stays dropped) |
+| Primary CTA buttons and pills | Band backgrounds |
+| Tag pills | Body text or headings |
+| The `4px` left border on entry/event cards | Large fills of any kind |
+
+This restores brand recognition without disturbing the layout, and it keeps the component
+specs simple: orange is a *state*, not a *surface*.
+
+### Decision: dark tokens minted, light-only implementation (owner, 2026-07-31)
+
+Mint the full dark token set now so a later retrofit is cheap, but **implement light mode only**
+in components. Dark values are recorded above and go into `Builder Variable`; no component
+ships a `prefers-color-scheme` branch, and there is no theme toggle. Treat any dark-mode
+styling as out of scope until that decision is revisited.
+
 ### Untokenized values found live — these need tokens
 The current site hardcodes five derived colors with no variable behind them. Tokenizing these
 is a concrete part of the theming overhaul:
@@ -117,8 +139,8 @@ Full live stack: `Rubik, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-s
 | `type/eyebrow` | `0.65rem` | — | 700, uppercase, `letter-spacing 0.12em` |
 | `type/timestamp` | `0.75rem` | — | mono, italic |
 
-Note the current h2 has **no orange underline** — that was Quartz chrome. Introducing accent
-at section headings is an open design choice (§10), not a port.
+Note the current h2 has **no orange underline** — that was Quartz chrome, and per the §2
+accent-only decision it stays dropped.
 
 ---
 
@@ -321,8 +343,8 @@ Per the standing owner rule, every build ships **tokens + components + a page te
   everything else nests inside it.
 - **Template → `Builder Page`** with `is_template=1` in the existing
   `template_group: cascadesteam`; extend `cascadesteam-starter` rather than adding a rival.
-- **Dark mode:** the legacy source ships a full dark palette but the current site implements
-  only light. Building dark is net-new work — confirm it is in scope.
+- **Dark mode:** mint the dark tokens, implement light only (§2 decision). Do not add
+  `prefers-color-scheme` branches to components.
 - All publishing to the live instance runs **via an OpsKit subagent**; compose and preview
   locally.
 
@@ -337,8 +359,8 @@ Per the standing owner rule, every build ships **tokens + components + a page te
 | **Mobile nav** | The flat link row wraps at ≤576px. With Events, About, Projects and Leadership added, the row gets much longer — needs a real drawer/disclosure rather than wrapping. |
 | **Nav is incomplete** | Header lists Home, Community Groups, Community Projects, only 4 of 7 groups, and Donate. Missing About, Events, and all Projects children. Needs an information-architecture pass, not just styling. |
 | **Hero has no logo** | Legacy hero centred the horizontal logo; the current hero is text-only. Confirm which is wanted. |
-| **Accent is barely used** | The current site is cyan/grey; brand orange is nearly absent despite being the legacy accent. Decide deliberately how much orange returns. |
-| **Dark mode** | Palette exists in the legacy source, unimplemented live. In scope or not? |
+| ~~Accent usage~~ | **Resolved** — accent-only orange, §2. |
+| ~~Dark mode~~ | **Resolved** — tokens minted, light-only implementation, §2. |
 | **Search** | Legacy header reserved 260px for Quartz client-side search. The current header has none. Decide: Frappe website search, or drop it. |
 | **Google Fonts** | Loaded from the Google CDN. Confirm whether to self-host on the Frappe site. |
 | **`h3` and below** | Live pages only use h1/h2. Sizes below h2 are still inferred. |

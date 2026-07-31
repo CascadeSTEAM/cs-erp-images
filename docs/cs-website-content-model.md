@@ -21,8 +21,8 @@ raw text and images that are automatically placed in the site properly."*
 
 ## 1. Verified Builder capability (frappe/builder @ develop)
 
-The plan below depends on four Builder features. All four are confirmed present in source,
-not assumed:
+The plan below depends on the Builder features below. All are confirmed present in source, not
+assumed:
 
 | Capability | Evidence |
 |------------|----------|
@@ -34,11 +34,40 @@ not assumed:
 Consequence: **components can take props, listings can repeat over a query, and detail pages
 can be one template serving N records.** That is the whole architecture — no per-record pages.
 
+### Repeater and binding rules — read before building blocks
+
+These come from `builder_page.py` (`is_repeater_block`, `render_repeater_children`,
+`get_loop_info`, `set_dynamic_content_placeholders`). Each one is a trap that silently
+produces wrong output rather than an error:
+
+- **A repeater is only a repeater if all three are present:** `isRepeaterBlock` truthy **and**
+  `children` non-empty **and** `dataKey` set. Miss one and it renders as an ordinary block.
+- **Only `children[0]` is repeated.** `render_repeater_children` takes
+  `block["children"][0]` as the item template and **silently ignores every other child**. The
+  repeater container must hold exactly one child — put the card markup inside that one child.
+- **The loop iterates `dataKey.key`; `dataKey.property` is irrelevant on the container.**
+  Rendering emits Jinja `{% for <loop_var> in <dataKey.key> %}`. Setting `property` on the
+  repeater container instead applies a *content binding to the container itself* — not what
+  you want.
+- **Attribute bindings need `type: "attribute"`.** `src` / `href` bind with
+  `{"type": "attribute", "property": "src", …}`. `type: "key"` is for text content. Using the
+  wrong type writes the value into the wrong place.
+- **Never record the same binding in both `dataKey` and `dynamicValues`.** The renderer
+  dedupes on `(property, type)` precisely because applying it twice nests the placeholder
+  inside its own fallback and **leaks the raw Jinja expression** when the value is falsy.
+- **`visibilityCondition` is not honoured on a repeater's immediate child.**
+  `render_children` sets `child_context["visibility_key"]`; `render_repeater_children` does
+  not. So conditional hiding works on elements *nested inside* the card, but not on the card's
+  own root. Wrap the card in an inner element if its root must be conditional.
+- `comesFrom` is `"dataScript"` for page-data bindings and `"props"` for component props.
+
 ---
 
 ## 2. Information architecture (from the live sitemap)
 
-The legacy site has 42 routes in four sections. Grouped by *shape* rather than by section:
+The legacy `sitemap.xml` lists **42 URLs**. They break down as **32 real content routes**
+plus 4 section indexes, the home page, and **5 that should not be public at all** (see the
+note below). Grouped by *shape*:
 
 | Shape | Count | Live routes |
 |-------|-------|-------------|
@@ -49,8 +78,21 @@ The legacy site has 42 routes in four sections. Grouped by *shape* rather than b
 | **Events** | 1 index | `Events/` (aliases `/events`, `/calendar`) |
 | **News** | — | Template exists (`assets/_templates/News.md`, `tags: [news]`) but no posts published yet |
 
-20 of these 42 routes are **Group** or **Project** — same shape, same fields, 20 hand-built
-pages today. Those collapse to *one* template + 20 form records.
+That is 7 + 13 + 3 + 8 + 1 = **32 content routes**. The remaining 10 sitemap URLs are the home
+page, the four section indexes (`About/`, `Events/`, `Groups/`, `Projects/`, one of which is
+already counted above), and five leaked internals.
+
+**20 of the 32 content routes are Group or Project** — same shape, same fields, maintained as
+separate pages today. Those collapse to *one* template + 20 form records.
+
+> **Live-site bug found while auditing this.** The sitemap publicly exposes
+> `assets/_templates/News`, `assets/_templates/Page`, `assets/fragments/global-header`,
+> `assets/fragments/global-footer` and `assets/groups/Open-Source/DNS/DNS_Presentation`.
+> Quartz's `ignorePatterns` is `["private", "templates", ".obsidian", "**/README.md"]` — the
+> pattern `templates` does **not** match the directory `_templates`, so internal authoring
+> templates and layout fragments are indexed as public pages. Worth fixing on the legacy site
+> if it stays up at all, and a reminder to keep authoring scaffolding out of the sitemap on the
+> Builder site (`disable_indexing` on `Builder Page`, or simply `published = 0`).
 
 **Built so far on `new.cascadesteam.org` (audited 2026-07-31):** 13 Builder pages — `home`,
 all 7 Groups, `community-groups`, `community-projects`, `service-corps`,
@@ -118,7 +160,7 @@ ever sees the handful of fields relevant to what they picked.
 | `role_title`, `email`, `linkedin`, `photo` | Data / Attach Image | `depends_on: entry_type=="Person"` |
 | `parent_entry` | Link → `Website Entry` | optional; lets a Project point at its Group |
 
-### 4.2 Events — core `Event` + Custom Fields  *(recommended)*
+### 4.2 Events — core `Event` + Custom Fields  *(decided)*
 
 Frappe core already ships an `Event` doctype (`subject`, `starts_on`, `ends_on`, `all_day`,
 `description`, `event_category`, `event_type` Public/Private, `color`) **with a built-in
@@ -148,8 +190,10 @@ discovered at go-live:
 | **Historical events** in the Google calendar. | Decide whether to migrate past events or start clean from cutover. Starting clean is cheaper and probably fine for a public site. |
 | Google Calendar is the single point of failure today; ERPNext becomes it instead. | Covered by the existing nightly backup of the bench. |
 
-Events get their own detail route and listing, so `Website Event` needs `route` + a Builder
-dynamic page just like `Website Entry` (§5).
+Events get their own detail route and listing, so the **core `Event`** doctype needs the
+`route` Custom Field above plus a Builder dynamic page, exactly as `Website Entry` has (§5).
+(Earlier drafts referred to a separate `Website Event` doctype — that alternative was rejected
+in favour of extending core `Event`. There is no `Website Event` doctype in this design.)
 
 ### 4.3 News — `Website Entry` now, native `Blog Post` available later
 
@@ -176,7 +220,7 @@ Each listing is one page with a repeater; each detail view is one dynamic-route 
 | Builder page | Route | `dynamic_route` | Renders |
 |--------------|-------|-----------------|---------|
 | Home | `home` | no | Hero, mission, featured entries, community links (set as `Website Settings.home_page`) |
-| Groups index | `groups` | no | `cs/card-grid` repeating `cs/event-card` over all `Group` entries |
+| Groups index | `groups` | no | `cs/card-grid` repeating `cs/entry-card` over all `Group` entries |
 | Projects index | `projects` | no | same, over `Project` entries, split by the source's Community Building / Community Service grouping |
 | Entry detail | `:slug` | **yes** | Serves every Group, Project, Person and Page from one template |
 | Events index | `events` | no | Repeater over published `Event` records, upcoming first, as `cs/event-card`s. Google Calendar embed retired (§4.2); add the ICS subscribe link here |
@@ -224,11 +268,17 @@ if not entry:
 data = {"entry": entry[0], "page_title": entry[0].title}
 ```
 
-Binding: the repeater container gets `isRepeaterBlock: true` with
-`dataKey = {"key": "entries", "property": "innerHTML", "type": "key", "comesFrom": "dataScript"}`;
-child blocks bind their `innerHTML` / `src` / `href` to item fields via `dataKey` or
-`dynamicValues`. Optional elements (a missing banner, an absent RSVP link) use
-`visibilityCondition` rather than a second template.
+Binding, per the rules in §1:
+
+- The repeater container gets `isRepeaterBlock: true` and
+  `dataKey = {"key": "entries", "comesFrom": "dataScript"}` — **`key` is the iterator**; do not
+  set `property` here.
+- It holds **exactly one child**, the card template. Any sibling would be silently dropped.
+- Inside the card, text binds with `type: "key"` and attributes (`src`, `href`) bind with
+  `type: "attribute"`.
+- Optional elements (a missing banner, an absent RSVP link) use `visibilityCondition` — but on
+  elements *nested inside* the card, never on the card's own root, which the repeater path does
+  not evaluate.
 
 ---
 
@@ -236,14 +286,23 @@ child blocks bind their `innerHTML` / `src` / `href` to item fields via `dataKey
 
 All native Frappe features — no code:
 
-- **Role `Website Content Author`** with read/write on `Website Entry` + `Event` only, and
-  **no** access to `Builder Page`, `Builder Component`, or `Builder Variable`. This is the
-  hard boundary that makes the two-tier split real rather than a convention.
+- **Role `Website Content Author`** with read/write on `Website Entry` + `Event`, and **no**
+  access to `Builder Page`, `Builder Component`, or `Builder Variable`. This is the hard
+  boundary that makes the two-tier split real rather than a convention.
+  - It also needs **`File` create** (otherwise image attachment silently fails) and **`Tag`
+    read/write** (otherwise the tags field is unusable). Grant exactly those two and nothing
+    more — a role scoped only to the two content doctypes looks correct but cannot do the job.
 - **Workspace "Website Content"** — a Desk landing page with just the shortcuts they need,
   so they never navigate the wider ERPNext menu.
 - **`published` as the gate** — nothing is public until ticked. Add a **Workflow** if
   manager review before publish is wanted.
-- **Naming/route uniqueness** enforced on the doctype, so a creator cannot collide routes.
+- **Route uniqueness — needs more than `unique: 1`.** A unique constraint on
+  `Website Entry.route` only prevents collisions *within* the doctype. Because the flat `:slug`
+  scheme shares one URL namespace with every static `Builder Page` route, a creator could enter
+  `home`, `events` or `groups` and the static page would **silently win** — their page would
+  simply never appear, with no error. Add a validation hook that rejects any route matching an
+  existing `Builder Page.route`, or namespace entry routes. This is the one guardrail that
+  genuinely cannot be built from doctype settings alone.
 - **Website Route Redirect** for every legacy alias, so existing inbound links survive the
   Quartz → Builder cutover.
 
@@ -280,7 +339,7 @@ so nothing 404s.
    pages as template instances — **preserving their current layout**, which is the reference
    design — so they stop being hand-maintained one-offs.
 6. `is_template=1` page template in `template_group: cascadesteam` — retest whether
-   `developer_mode` is actually required (design system §7 suggests it may not be).
+   `developer_mode` is actually required (design system §8 suggests it may not be).
 7. ICS feed for events (§4.2) + `Website Route Redirect` for every legacy alias, then go-live:
    bind `cascadesteam.org` + `www`, DNS cutover, retire Quartz and the Google Calendar embed.
 
