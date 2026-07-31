@@ -54,10 +54,15 @@ pages today. Those collapse to *one* template + 20 form records.
 
 **Built so far on `new.cascadesteam.org` (audited 2026-07-31):** 13 Builder pages — `home`,
 all 7 Groups, `community-groups`, `community-projects`, `service-corps`,
-`collaborative-internship`. Each is a **hand-built page**, which is exactly the duplication
-this model removes. **Not built at all:** the 8 `About/*` pages, `Events`, the 3 Leadership
-profiles, and 11 of the 13 Projects — so most of the site is still missing, and building the
-remainder by hand is what the content model is meant to prevent.
+`collaborative-internship`. **Not built at all:** the 8 `About/*` pages, `Events`, the 3
+Leadership profiles, and 11 of the 13 Projects.
+
+Important framing (owner direction, 2026-07-31): **the current pages' layout is the preferred
+direction and is the reference implementation** — see the design-system doc §4. What this
+content model removes is not the layout but the *duplication*: 20 Group/Project routes that
+are the same shape, maintained as separate hand-built pages, and 29 routes that don't exist
+because hand-building them is expensive. The layout stays; it becomes a template that records
+fill.
 
 ---
 
@@ -259,18 +264,21 @@ so nothing 404s.
 
 ## 8. Build order
 
-0. **Snapshot + site backup** — the token reset deletes all 8 existing `Builder Variable`
-   records and the 13 pages get rebuilt. Take a `Builder Snapshot` and a site backup first.
-1. Tokens → `Builder Variable`, full clean mint (design system §2, §5, §7 decision) — read
-   back every minted UUID before referencing it. Delete the old 8 only after the new set reads
-   back correctly.
-2. Components → `Builder Component` (design system §4). Rebuild `cs_header` / `cs_footer` on
-   the new tokens first, then the 12 missing components.
+0. **Snapshot + site backup** before touching tokens or pages — `Builder Snapshot` plus a
+   site backup.
+1. Tokens → `Builder Variable`: **rename/remap in place and add the missing layer**
+   (design system §8, revised strategy). The 8 existing records stay — renaming is safe
+   because the UUID is the reference, and 50+ live `var()` calls per page depend on them.
+   Read back every newly minted UUID before referencing it, then sweep hardcoded values.
+2. Components → `Builder Component` (design system §5). Build `cs/band` first — it is the
+   layout skeleton everything else nests in — then `cs/header` / `cs/footer` (fixing the stale
+   "Built with Obsidian and Quartz" attribution), then the listing/card components.
 3. `Website Entry` doctype + `Event` Custom Fields & Customize Form + `Website Content Author`
    role + Workspace.
 4. Migration script → populate real content from `~/Projects/cascadesteam.github.io`.
-5. The 7 Builder pages + `page_data_script`s + repeater bindings; rebuild the 13 existing
-   pages as template instances rather than hand-built one-offs.
+5. The 7 Builder pages + `page_data_script`s + repeater bindings. Re-express the 13 existing
+   pages as template instances — **preserving their current layout**, which is the reference
+   design — so they stop being hand-maintained one-offs.
 6. `is_template=1` page template in `template_group: cascadesteam` — retest whether
    `developer_mode` is actually required (design system §7 suggests it may not be).
 7. ICS feed for events (§4.2) + `Website Route Redirect` for every legacy alias, then go-live:
