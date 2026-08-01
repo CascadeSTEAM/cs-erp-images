@@ -74,3 +74,37 @@ the previous session's "site was clean" probe was committed. Hidden by the site 
 agent still running, result not seen. **Probe before trusting anything.**
 
 **Session note:** `docs/session-notes/session_note_202607312127.md`
+
+---
+
+## Session: 2026-07-31 (late evening) — CS-0061 worker DB auth fix
+
+**Focus:** CS-0061 — RQ workers cannot authenticate to MariaDB
+
+**Completed:**
+- [x] Validated CS-0061 as real and active — reproduced 1045 from all three worker/scheduler containers
+- [x] Root-caused: MariaDB grant pinned to `172.18.0.8` only; `setup_db` derives grant host from `SELECT USER()` at `bench new-site`
+- [x] Ruled out password, site config, Redis, volumes, DNS, missing DB, paused scheduler — each with direct evidence
+- [x] Fixed 2026-08-01 04:00:46 UTC — added `'%'` grant, hash copied server-side; no restart, no config change
+- [x] Verified — control job `finished`, 4 clean scheduler ticks, `last_execution` 39/39 non-NULL, 0 new 1045s
+- [x] Discarded 17 stale failed jobs; verified support's 14 unrelated failures intact
+- [x] CS-0061 resolved with full root-cause comment; `status_category`/`resolution_date` verified consistent
+- [x] Filed CS-0065 — audit IP-pinned grants across all OpsKit-managed environments
+- [x] Commented CS-0055; retired the stale-lock/synchronous-cache-clear workaround from repo docs
+
+**Discovered:** the site had been broken **since creation (2026-07-22)** — 39/39 Scheduled Job
+Types had never executed once and `Scheduled Job Log` was empty. Not a regression. Also: the
+IP-pinned grant meant a container *recreate* would have broken the **web** path too, so the
+site was one `docker compose up -d` away from a full outage, not just dead background jobs.
+
+**Corrections to the ticket:** "outbound email is dead" was misattributed — the site has 0 Email
+Accounts, so this fix does not restore mail. The stale-lock backlog was already gone.
+
+**Concurrency:** a second session was active on this branch; its commit `a6768aa` swept up this
+session's doc edits under an unrelated message. Changes are committed and pushed.
+
+**Still open:** blank `System Settings.time_zone` on `new.cascadesteam.org` (IST vs UTC trap —
+set before any `Event` data); 0 Email Accounts on that site; `MYSQL_ROOT_PASSWORD` plaintext in
+`/root/cs-erpnext-v2-compose.yml` (OpsKit backlog).
+
+**Session note:** `docs/session-notes/session_note_202607312137.md`
