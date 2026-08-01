@@ -10,23 +10,42 @@ an OpsKit subagent.
 
 ---
 
-## State at stop
+## State at stop — RESOLVED: the site was clean
 
-> **FILL THIS IN from the probe result before resuming.** If the probe result was lost with the
-> session, re-run the probe first — the checklist is in "Verify current state" below. Do not
-> assume the site is clean: the agent may have created the doctype, part of it, or nothing.
+Probed 2026-08-01. The killed agent reported *"Now applying Step 3 — schema"* but **died before
+its first `insert()` landed.** Every object below was absent, with no orphan MariaDB tables and
+no `Deleted Document` tombstones. The locks dir was empty. Builder state was byte-identical to
+the last committed session: 13 pages / 11 components / 50 variables, both probed URLs 200, logo
+at 40px, Quartz attribution gone.
 
 | Object | Expected if step 3 completed | Actual at stop |
 |---|---|---|
-| DocType `Website Entry` | exists, full field list | _tbd_ |
-| DocType `Website Entry Tag` | exists, istable | _tbd_ |
-| `Website Entry` records | 31 | _tbd_ |
-| `Event` custom fields | 6 | _tbd_ |
-| `Event` property setters | Customize Form applied | _tbd_ |
-| Role `Website Content Author` | exists + File/Tag perms | _tbd_ |
-| Workspace "Website Content" | exists | _tbd_ |
-| Migration `File` records | 20 | _tbd_ |
-| `Website Route Redirect` | ~70 | _tbd_ |
+| DocType `Website Entry` | exists, full field list | **absent** (never created) |
+| DocType `Website Entry Tag` | exists, istable | **absent** |
+| `Website Entry` records | 31 | **0** |
+| `Event` custom fields | 6 | **0 of 6** |
+| `Event` property setters | Customize Form applied | **0** |
+| Role `Website Content Author` | exists + File/Tag perms | **absent** |
+| Workspace "Website Content" | exists | **absent** |
+| Migration `File` records | 20 | **0** |
+| `Website Route Redirect` | ~70 | **0** |
+
+**Resume from a clean slate — there is no cleanup phase.**
+
+### Two open questions the probe closed
+- **Module `Website` exists.** Use `module: "Website"` as the JSON already specifies; nothing
+  needs creating.
+- **`server_script_enabled` is null** in site_config, so the route-collision guard cannot be a
+  Server Script without a site_config change. Out of scope; record and move on.
+
+### Two things the probe turned up that aren't in the plan
+- **`System Settings.time_zone` is BLANK**, so Frappe falls back to **IST (UTC+5:30)** for
+  stored timestamps — a Pacific-timezone organisation storing times in IST. Harmless for the
+  static content migration, but it is a live hazard for the decision to make **ERPNext canonical
+  for events**: event start/end times would be entered and displayed against the wrong zone.
+  Settle this before any event data is created.
+- **`frappe-exec.py` commits on every successful run**, so a script that fails mid-batch can
+  leave a partial commit. Insert idempotently and re-probe counts between batches.
 
 ---
 
