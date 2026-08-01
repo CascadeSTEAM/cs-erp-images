@@ -45,6 +45,18 @@ SKIP = {"index.md", "Events/index.md", "About/Leadership/index.md",
 NEVER = ("assets/", "internal/", "_templates", "fragments")
 
 DOC_SUFFIXES = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".zip"}
+IMG_SUFFIXES = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
+ASSET_SUFFIXES = DOC_SUFFIXES | IMG_SUFFIXES
+
+# Legacy section indexes -> the Builder pages that will serve them.
+SECTION_ROUTES = {
+    "groups": "community-groups",
+    "projects": "community-projects",
+    "events": "events",
+    "about": "about",
+    "about/leadership": "leadership",
+    "leadership": "leadership",
+}
 
 
 def slugify(text):
@@ -92,6 +104,7 @@ class Body:
         self.assets = asset_index
         self.used_assets = set()
         self.unresolved_links = []
+        self.dropped_tag_links = []
         self.portrait = None
 
     def _asset_href(self, name):
@@ -136,6 +149,73 @@ class Body:
             return text  # degrade to plain text rather than emit a dead link
         return f'<a href="/{route}">{text}</a>'
 
+    # --- ordinary markdown links -------------------------------------------
+    # [[wikilinks]] are only half the story. Plain markdown links
+    # ([text](../Groups/Cyber)) survive conversion untouched and point at the
+    # legacy nested paths, which do not exist on the new site. Left alone they
+    # render as dead links, so they are rewritten after conversion.
+
+    def _resolve_ref(self, raw):
+        """Legacy href/src -> new URL, or None to unwrap the link entirely."""
+        ref = raw.strip()
+        if not ref or ref.startswith(
+            ("http://", "https://", "mailto:", "tel:", "#", "/files/")
+        ):
+            return raw
+
+        frag = ""
+        if "#" in ref:
+            ref, _, frag = ref.partition("#")
+            frag = "#" + frag
+        ref = re.sub(r"^(?:\.\./)+", "", ref).lstrip("/").rstrip("/")
+
+        if not ref or ref.lower() == "index":
+            return "/" + frag                       # the site root
+
+        # Quartz tag pages have no equivalent here — unwrap to plain text.
+        if ref.lower().startswith("tags/") or ref.lower() == "tags":
+            self.dropped_tag_links.append(raw)
+            return None
+
+        # Assets: any path under assets/, or anything with a file extension.
+        base = ref.split("/")[-1]
+        if ref.lower().startswith("assets/") or (
+            pathlib.Path(base).suffix.lower() in ASSET_SUFFIXES
+        ):
+            if base in self.assets:
+                self.used_assets.add(base)
+                return f"/files/{base}{frag}"
+            self.unresolved_links.append(raw)
+            return raw
+
+        # Section indexes (Groups/, About/Leadership/, ...) before entry lookup,
+        # so a bare section name doesn't slug-match an entry of the same name.
+        sect = SECTION_ROUTES.get(ref.lower())
+        if sect:
+            return f"/{sect}{frag}"
+
+        route = (self.routes.get(slugify(base))
+                 or self.routes.get(slugify(ref)))
+        if route:
+            return f"/{route}{frag}"
+
+        self.unresolved_links.append(raw)
+        return raw
+
+    def _rewrite_attr(self, m):
+        attr, quote, value = m.group(1), m.group(2), m.group(3)
+        new = self._resolve_ref(value)
+        if new is None:
+            return f'{attr}={quote}\x00DROP\x00{quote}'
+        return f"{attr}={quote}{new}{quote}"
+
+    def rewrite_links(self, html):
+        html = re.sub(r'\b(href|src)=(["\'])(.*?)\2', self._rewrite_attr, html)
+        # Unwrap anchors whose target has no equivalent, keeping their text.
+        html = re.sub(r'<a\b[^>]*href=["\']\x00DROP\x00["\'][^>]*>(.*?)</a>',
+                      r"\1", html, flags=re.S)
+        return html
+
     def convert(self, text):
         text = re.sub(r"<!--.*?-->", "", text, flags=re.S)      # drop draft content
         text = re.sub(r"!\[\[([^\]]+)\]\]", self._embed, text)  # embeds first
@@ -143,7 +223,7 @@ class Body:
         html = markdown.markdown(
             text, extensions=["extra", "sane_lists", "nl2br"], output_format="html5"
         )
-        return html.strip()
+        return self.rewrite_links(html).strip()
 
 
 def collect(src):
@@ -165,9 +245,9 @@ def collect(src):
 def build_asset_index(src):
     idx = {}
     for p in src.rglob("*"):
-        if p.is_file() and p.suffix.lower() in {
-            ".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf"
-        }:
+        # ASSET_SUFFIXES, not a narrower literal set: a hardcoded list here
+        # silently drops .pptx/.docx attachments that pages legitimately link to.
+        if p.is_file() and p.suffix.lower() in ASSET_SUFFIXES:
             idx.setdefault(p.name, p)
     return idx
 
