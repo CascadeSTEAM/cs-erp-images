@@ -51,3 +51,26 @@
 - [x] fix: patch wiki User.after_insert hook — stale-doc save broke all user creation
 
 **Session note:** `docs/session-notes/session_note_202607311655.md`
+
+---
+
+## Session: 2026-07-31 (evening) — CS-0055 steps 3–5
+
+**Focus:** Resume CS-0055 — schema, content migration, Builder pages
+
+**Completed:**
+- [x] Step 3 — `Website Entry` + `Website Entry Tag`, role, workspace, 5 Event custom fields, 20 property setters
+- [x] Step 4 — 31 entries, 27 assets, 39 redirects (+31 self-pointers = 70); all verified by read-back
+- [x] Permission boundary tested empirically — role has zero Builder DocPerms
+- [x] Repaired 31 stale entry bodies: 56 un-rewritten internal refs → 0
+- [x] Fixed 3 `migrate_content.py` defects + 1 self-inflicted double-rewrite bug
+- [x] Step 5 planned — `tools/cs-website/STEP-5-pages.md`; inventory is 9 pages, not 7
+- [x] Documented the IST timestamp trap and marked `RESUME-steps-3-4.md` superseded
+
+**Discovered:** steps 3+4 had already been applied by an **unrecorded run** three minutes after
+the previous session's "site was clean" probe was committed. Hidden by the site storing IST.
+
+**In flight at session end:** step 5 (9 Builder pages + data scripts + repeater bindings) —
+agent still running, result not seen. **Probe before trusting anything.**
+
+**Session note:** `docs/session-notes/session_note_202607312127.md`

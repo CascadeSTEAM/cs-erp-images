@@ -1,5 +1,16 @@
 # RESUME: steps 3 + 4 — content doctype and migration (CS-0055)
 
+> ## ⚠️ SUPERSEDED — do not act on this file
+>
+> **Steps 3 and 4 are applied.** The "State at stop — RESOLVED: the site was clean" section
+> below was accurate when written and was then overtaken by an **unrecorded run** that
+> executed at 2026-07-31 18:39–18:47 PDT (site-time `2026-08-01 07:09–07:17`, because the site
+> stores IST) — roughly three minutes *after* the probe commit `33e1aeb` was written. A second
+> probe on resume found 31 entries, 27 assets, 39 redirects, both doctypes, the role and the
+> workspace all live.
+>
+> Kept as the record of how the gap happened. Current status lives in `README.md`.
+
 **Status:** started 2026-07-31 16:51 PDT, **killed ~3.5 min in** at the owner's request rather
 than left running unattended. Last reported action: *"Now applying Step 3 — schema."*
 A read-only probe was run immediately after the stop — **see "State at stop" below before
@@ -113,10 +124,12 @@ Last clean dry run: **31 entries** (Group 7, Project 13, Person 3, Page 8), **20
 - **All live access goes through an OpsKit subagent** using `bin/frappe-exec.py`
   (`--site new.cascadesteam.org --container cs-erpnext-v2-backend-1 --ssh-alias cs-erpnext`).
   The `cs` `env.yml` has no `frappe:` block, so those flags are required.
-- **CS-0061 is open: all background jobs fail** (RQ workers can't authenticate to MariaDB). So
-  `queue_action` locks documents and never releases them, and caches never clear. For every
-  save: clear any stale `.lock` first, then call `clear_website_cache()` and
-  `frappe.clear_cache()` synchronously. Leave the locks dir empty.
+- **CS-0061 is RESOLVED (2026-08-01).** Background jobs work. The worker containers were missing
+  a MariaDB grant (the account was pinned to the backend container's IP only); a `'%'` grant was
+  added. You no longer need to clear stale `.lock` files or call `clear_website_cache()` /
+  `frappe.clear_cache()` synchronously after every save — `queue_action` releases its locks and
+  enqueued cache clears run on their own. A persistent `.lock` reappearing means CS-0061 has
+  regressed; check the grants rather than resuming the manual workaround.
 - **Never modify existing Builder Pages, Components or Variables** in this step.
 - The site is **not public** — visible breakage is acceptable and the owner prefers seeing
   changes land. Backups (`20260801_040523`) and 13 snapshots are the net.

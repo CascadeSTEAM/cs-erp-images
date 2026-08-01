@@ -99,13 +99,41 @@ def legacy_routes(path):
 class Body:
     """Converts one Obsidian markdown body to HTML, collecting asset references."""
 
-    def __init__(self, route_index, asset_index):
+    def __init__(self, route_index, asset_index, rel=None):
         self.routes = route_index
         self.assets = asset_index
+        # The file being converted, so `index` / `index.md` can resolve against the
+        # section that contains it rather than defaulting to the site root.
+        self.section = str(rel.parent).strip(".").strip("/").lower() if rel else ""
+        # Destinations this converter itself emits. `rewrite_links()` runs over the
+        # HTML *after* the wikilink pass, so without this it re-resolves links that
+        # were already rewritten — `[[Projects/index]]` becomes `/community-projects`
+        # and is then reported unresolved because that is a destination, not a source.
+        self.known_routes = ({str(r).lower() for r in route_index.values()}
+                             | {v.lower() for v in SECTION_ROUTES.values()})
         self.used_assets = set()
         self.unresolved_links = []
         self.dropped_tag_links = []
         self.portrait = None
+
+    def _index_route(self, ref):
+        """`index`, `index.md`, `Section/index` -> the section's Builder page.
+
+        A bare `index` is NOT the site root: `Groups/Engineering.md` says
+        "[Community Group](index.md)", meaning the Groups index. Resolve it against
+        the containing directory and only fall back to `/` at the vault root.
+        """
+        low = ref.lower().rstrip("/")
+        if low in ("index", "index.md"):
+            sect = self.section
+        elif low.endswith(("/index", "/index.md")):
+            sect = low.rsplit("/", 1)[0]
+        else:
+            return None
+        if not sect:
+            return "/"
+        route = SECTION_ROUTES.get(sect)
+        return f"/{route}" if route else None
 
     def _asset_href(self, name):
         base = name.split("/")[-1]
@@ -142,6 +170,10 @@ class Body:
             self.unresolved_links.append(name)
             return text
 
+        idx = self._index_route(name)
+        if idx:
+            return f'<a href="{idx}">{text}</a>'
+
         key = slugify(name.split("/")[-1])
         route = self.routes.get(key) or self.routes.get(slugify(name))
         if not route:
@@ -169,8 +201,16 @@ class Body:
             frag = "#" + frag
         ref = re.sub(r"^(?:\.\./)+", "", ref).lstrip("/").rstrip("/")
 
-        if not ref or ref.lower() == "index":
+        if not ref:
             return "/" + frag                       # the site root
+
+        # Already an absolute link to a destination we own — leave it alone.
+        if raw.strip().startswith("/") and ref.lower() in self.known_routes:
+            return raw
+
+        idx = self._index_route(ref)
+        if idx:
+            return idx + frag
 
         # Quartz tag pages have no equivalent here — unwrap to plain text.
         if ref.lower().startswith("tags/") or ref.lower() == "tags":
@@ -247,7 +287,16 @@ def build_asset_index(src):
     for p in src.rglob("*"):
         # ASSET_SUFFIXES, not a narrower literal set: a hardcoded list here
         # silently drops .pptx/.docx attachments that pages legitimately link to.
-        if p.is_file() and p.suffix.lower() in ASSET_SUFFIXES:
+        if not p.is_file():
+            continue
+        # Anything under assets/ is by definition an attachment, whatever its
+        # suffix — assets/groups/Open-Source/DNS/DNS_Presentation.md is markdown
+        # slides that pages link to as a document. `.md` is deliberately NOT added
+        # to ASSET_SUFFIXES: that set also drives the "any path with a file
+        # extension is an asset" branch in _resolve_ref, so widening it there would
+        # turn every ordinary markdown link into an asset lookup.
+        under_assets = "assets" in (part.lower() for part in p.relative_to(src).parts[:-1])
+        if p.suffix.lower() in ASSET_SUFFIXES or (under_assets and p.suffix.lower() == ".md"):
             idx.setdefault(p.name, p)
     return idx
 
@@ -277,13 +326,17 @@ def main():
     # Pass 2 — convert.
     entries, all_assets, unresolved, dupes = [], set(), [], {}
     for p, rel, etype, fm, body, route in meta:
-        conv = Body(route_index, asset_index)
+        conv = Body(route_index, asset_index, rel)
         html = conv.convert(body)
         all_assets |= conv.used_assets
         unresolved += [(str(rel), u) for u in conv.unresolved_links]
         dupes.setdefault(route, []).append(str(rel))
 
-        tags = [str(t) for t in (fm.get("tags") or [])]
+        # Obsidian writes inline tags as `#artificial-intelligence`; the leading
+        # hash is syntax, not part of the tag. Left on, it mints a distinct core
+        # `Tag` record that will never match the same tag written without it.
+        tags = [str(t).lstrip("#").strip() for t in (fm.get("tags") or [])]
+        tags = [t for t in tags if t]
         entry = {
             "doctype": "Website Entry",
             "title": fm.get("title") or p.stem,

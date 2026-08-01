@@ -16,16 +16,39 @@ Tracking ticket: **CS-0055** — <https://support.cascadesteam.org/helpdesk/tick
 | 0 · Backup + snapshots | **Done.** Backup set `20260801_040523` (on-box + off-box on cspve2), 13 manual Builder Snapshots `SNAP-0005`–`SNAP-0017`, JSON state export attached to CS-0055. |
 | 1 · Design tokens | **Done.** 50 `Builder Variable` records live (17 Color + 33 Dimension). 4 renamed in place, 8+4 minted. |
 | 2 · Component library | **Done.** 11 components published. `cs_header` / `cs_footer` restyled in place; the other 9 are new. |
-| 3 · `Website Entry` doctype | **Not started.** Definition ready in `website-entry-doctype.json`. |
-| 4 · Content migration | **Script done, not run.** Dry run: 31 entries, 20 assets, 70 redirects, zero collisions. |
-| 5 · Builder pages + data scripts | **Not started.** |
+| 3 · `Website Entry` doctype | **Applied.** Both doctypes live and matching the definition (`autoname: hash`, `unique` on `route`, module `Website`); role, workspace and 5 of 6 `Event` custom fields in place. `location` deliberately omitted — core `Event` already ships one. |
+| 4 · Content migration | **Applied.** 31 entries, 27 assets, 39 redirects (+31 self-pointers correctly skipped = the expected 70). |
+| 5 · Builder pages + data scripts | **Not started.** Carries a hard ordering constraint — see below. |
 | 6 · Page template | **Not started.** |
 | 7 · ICS feed, redirects, go-live | **Not started.** |
 
-**Open defects found along the way** (all filed, all High unless noted):
-- **CS-0061** — all background jobs on the site fail; RQ workers can't authenticate to
-  MariaDB. This is why `queue_action` leaves permanent doc locks and why page caches must be
-  cleared synchronously by hand after every component save.
+**Step 5 ordering constraint — do not retire Builder Pages early.** Nine `Website Entry`
+routes are shadowed by the legacy hand-built Builder Pages they are meant to replace:
+`artificial-intelligence`, `citizen-science`, `collaborative-internship`, `cyber`,
+`data-engineering`, `engineering`, `open-source`, `service-corps`, `spectrum` (all 7 Groups
+plus 2 Projects). This is **expected**, not a defect — the flat `:slug` scheme in
+`docs/cs-website-content-model.md` §5 relies on static routes resolving before dynamic ones.
+The entries are inert until the `:slug` template exists. Sequence: build the template →
+verify each of the nine renders from its `Website Entry` → *then* retire the old page, one at
+a time. Retiring first would 404 nine live URLs; renaming the routes would break inbound
+links, which is the whole reason the scheme is flat.
+
+**Timestamps on this site read +5:30.** `System Settings.time_zone` is blank, so Frappe
+stores IST. A "2026-08-01 07:09" `creation` value is **2026-07-31 18:39 PDT**. This is not
+cosmetic: it already caused a documented probe to be trusted after a later unrecorded run had
+overtaken it. Convert before concluding anything from a timestamp, and settle the timezone
+before any `Event` data is created.
+
+**Defects found along the way** (all filed, all High unless noted):
+- **CS-0061** — ~~all background jobs on the site fail~~ **RESOLVED 2026-08-01 04:00 UTC.**
+  Root cause: the MariaDB account `_4306fc09495277f5` had a grant for exactly one host —
+  `172.18.0.8`, the backend container's IP — because Frappe's `setup_db` derives the grant host
+  from `SELECT USER()` at `bench new-site` time. The workers (`.0.9`, `.0.5`) and scheduler
+  (`.0.7`) live at other IPs and had no grant at all, so every background job died on MariaDB
+  error 1045. Broken from site creation (2026-07-22); **39/39 scheduled job types had never
+  run once.** Fixed by adding the `'%'` grant that `support.cascadesteam.org` already had.
+  The old IP-pinned row was left in place and is now redundant. **The workaround this used to
+  require is gone — see the cache note below.**
 - **CS-0062** — Builder emits malformed `font-family` CSS (unmatched quote), so **no brand
   font renders anywhere**; every page falls back to the browser default.
 - **CS-0059** (Medium) — webfonts load from the Google CDN; should be self-hosted. Blocked
@@ -107,9 +130,13 @@ Builder emits `light-dark()`.
 `name`, so the two cannot diverge — and must not, since pages reference by `name` while
 `clear_page_cache()` matches on `component_id`.
 
-**Page caches will not clear themselves** while CS-0061 is open. After any component save:
-clear the stale `.lock`, then call `clear_page_cache()`, `clear_website_cache()` and
-`frappe.clear_cache()` synchronously.
+**Page caches now clear themselves again.** Background jobs were dead site-wide until CS-0061
+was fixed (2026-08-01), which is why earlier revisions of this file told you to clear a stale
+`.lock` and then call `clear_page_cache()`, `clear_website_cache()` and `frappe.clear_cache()`
+synchronously after every component save. **That workaround is no longer needed.** `queue_action`
+now releases its locks and enqueued cache clears actually run. If you ever see a `.lock` persist
+in `sites/new.cascadesteam.org/locks/` again, treat it as a regression of CS-0061 and check the
+grants before reaching for the manual workaround.
 
 ---
 

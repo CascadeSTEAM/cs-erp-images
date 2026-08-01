@@ -121,11 +121,11 @@
         "depends_on": "eval:doc.publish_on_website", "insert_after": "route" },
       { "fieldname": "banner", "label": "Banner image", "fieldtype": "Attach Image",
         "depends_on": "eval:doc.publish_on_website", "insert_after": "summary" },
-      { "fieldname": "location", "label": "Location", "fieldtype": "Data",
-        "depends_on": "eval:doc.publish_on_website", "insert_after": "banner" },
+      { "_removed": "location — core Event already ships a standard `location` (Data) field. A custom field of the same name is redundant and collides. Verified absent on the live site and deliberately left that way; use core's field.",
+        "fieldname": "location", "skip": true },
       { "fieldname": "rsvp_url", "label": "RSVP link", "fieldtype": "Data",
         "depends_on": "eval:doc.publish_on_website", "insert_after": "location",
-        "description": "Usually the Meetup event page. RSVPs are not handled here." }
+        "description": "Usually the Meetup event page. RSVPs are not handled here. `insert_after: location` targets core Event's own location field." }
     ],
     "customize_form": {
       "_why": "Core Event's form is calendar-operator oriented and cluttered for a content creator. Hide what they never need; this is native Customize Form, not code.",
